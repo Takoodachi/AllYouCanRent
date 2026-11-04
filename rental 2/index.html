@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>All you can rent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<style>
+.hero{padding-block:40px 28px;display:flex;flex-direction:column;gap:12px;max-width:640px}
+.hero h1{font-size:clamp(2.2rem,6vw,3.4rem)}
+.apps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+@media (max-width:820px){.apps{grid-template-columns:1fr}}
+.app-card{display:flex;flex-direction:column;gap:12px;padding:22px;text-decoration:none;color:inherit;border-top:6px solid var(--green)}
+.app-card.staff{border-top-color:#2f5d3a}
+.app-card.mgr{border-top-color:#b06a26}
+.app-card ul{margin:0;padding-left:18px;color:var(--muted);font-size:.9rem;display:flex;flex-direction:column;gap:4px}
+.app-card .btn{margin-top:auto;align-self:flex-start}
+</style>
+</head>
+<body>
+<header class="top" id="header"><div class="wrap"><a class="logo" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 27 L13 9 L18 17 L21 12 L29 27 Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="24" cy="7" r="2.6" fill="currentColor"/></svg> All you can rent</a></div></header>
+<main><div class="wrap">
+  <section class="hero">
+    <p class="eyebrow">Outdoor gear rental</p>
+    <h1>Try the outdoors without buying the gear</h1>
+    <p class="muted">Expert-picked gear bundles from your local outdoor shop. Reserve online, pick up at the store, and pay when you bring it back.</p>
+  </section>
+  <section class="apps">
+    <a class="card app-card" href="customer.html">
+      <p class="eyebrow">For renters</p><h2>Customer app</h2>
+      <ul><li>Create an account</li><li>Browse bundles by tag</li><li>Check dates and reserve a set</li><li>Post reviews</li><li>Message the store</li></ul>
+      <span class="btn btn-green">Start renting</span>
+    </a>
+    <a class="card app-card staff" href="employee.html">
+      <p class="eyebrow">For store staff</p><h2>Employee app</h2>
+      <ul><li>Check out and return sets</li><li>Add repair charges and lost items</li><li>Generate invoices</li><li>Read and answer customer messages</li></ul>
+      <span class="btn btn-quiet">Staff log in</span>
+    </a>
+    <a class="card app-card mgr" href="manager.html">
+      <p class="eyebrow">For managers</p><h2>Manager app</h2>
+      <ul><li>Create managers and employees</li><li>Add products with value and lifetime</li><li>Build bundles from products</li><li>Add sets of each bundle</li></ul>
+      <span class="btn btn-quiet">Manager log in</span>
+    </a>
+  </section>
+</div></main>
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+
+</body>
+</html>
