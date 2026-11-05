@@ -64,7 +64,7 @@ const API = (() => {
       post("/products", { userId: managerId, name, description, imageUrl: imageUrl || "", costWhenNew, lifetimeInDays }),
 
     /* ---------- bundles and sets ---------- */
-    // products = list of product ids (repeat an id to include it twice)
+    // products = list of product names, not ids (repeat a name to include it twice)
     createBundle: (managerId, { name, products, tags }) =>
       post("/bundles", { userId: managerId, name, products, tags }),
     listBundles: tag => get("/bundles" + (tag ? q({ tag }) : "")),     // → [{bundleId, name}]

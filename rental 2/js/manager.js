@@ -112,7 +112,7 @@ async function viewBundles() {
       <label class="f">Tags<span class="hint">Separate with commas</span><input class="in" name="tags" id="b-tags" placeholder="camping, beginner"></label>
       <div style="display:flex;flex-direction:column;gap:6px"><span style="font-weight:600;font-size:.9rem">Products and quantity</span>
         <div class="checklist" id="b-products"><span class="muted small">Loading products…</span></div>
-        <label class="f"><span class="hint">Other product ids, separated by commas</span><input class="in" id="b-ids" placeholder="optional"></label></div>
+        <label class="f"><span class="hint">Other product names, separated by commas</span><input class="in" id="b-ids" placeholder="optional"></label></div>
       <p class="small muted">The daily price is worked out by the server from the products in the bundle.</p>
       <div data-msg hidden></div>
       <button class="btn btn-green" type="submit">Create bundle</button>
@@ -120,14 +120,15 @@ async function viewBundles() {
     <div class="card pad stack"><h2>Current bundles</h2><div id="blist"><p class="muted small">Loading…</p></div></div>
   </div>`;
   const products = await knownProducts();
-  $("#b-products").innerHTML = products.length ? products.map(p => `<label><input type="number" class="in" style="width:64px;padding:6px 8px" min="0" value="0" data-pid="${esc(p.productId)}" aria-label="Quantity of ${esc(p.name)}"><span>${esc(p.name)} <span class="muted small">${money(p.costWhenNew)}</span></span></label>`).join("")
+  $("#b-products").innerHTML = products.length ? products.map(p => `<label><input type="number" class="in" style="width:64px;padding:6px 8px" min="0" value="0" data-pname="${esc(p.name)}" aria-label="Quantity of ${esc(p.name)}"><span>${esc(p.name)} <span class="muted small">${money(p.costWhenNew)}</span></span></label>`).join("")
     : `<span class="muted small">Add products first on the Products page.</span>`;
   onSubmit($("#bundle-form"), async (d, f) => {
-    const ids = $("#b-ids").value.split(/[\s,]+/).filter(Boolean);
-    f.querySelectorAll("[data-pid]").forEach(i => { for (let n = 0; n < (+i.value || 0); n++) ids.push(i.dataset.pid); });
-    if (!ids.length) throw new Error("Pick at least one product for the bundle.");
+    // The server matches bundle products by name, not by product id.
+    const names = $("#b-ids").value.split(",").map(s => s.trim()).filter(Boolean);
+    f.querySelectorAll("[data-pname]").forEach(i => { for (let n = 0; n < (+i.value || 0); n++) names.push(i.dataset.pname); });
+    if (!names.length) throw new Error("Pick at least one product for the bundle.");
     const tags = d.tags.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
-    const r = await API.createBundle(me.userId, { name: d.name.trim(), products: ids, tags });
+    const r = await API.createBundle(me.userId, { name: d.name.trim(), products: names, tags });
     f.reset(); loadBundles();
     return `Created ${d.name} (bundle ${r.id}). Add sets so customers can reserve it.`;
   });
