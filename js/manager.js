@@ -80,7 +80,7 @@ async function viewProducts() {
       <label class="f">Image URL<span class="hint">Optional, a link to a photo</span><input class="in" name="imageUrl" id="p-img" type="url" placeholder="https://…"></label>
       <div class="grid-2">
         <label class="f">Cost when new ($)<input class="in" name="costWhenNew" id="p-value" type="number" min="0" step="0.01" required></label>
-        <label class="f">Lifetime (days)<span class="hint">Rental days before it's worn out</span><input class="in" name="lifetimeInDays" id="p-life" type="number" min="1" step="1" required></label>
+        <label class="f">Lifetime (days)<span class="hint">Also sets the price: per day = cost ÷ lifetime</span><input class="in" name="lifetimeInDays" id="p-life" type="number" min="1" step="1" required></label>
       </div>
       <div data-msg hidden></div>
       <button class="btn btn-green" type="submit">Add product</button>
