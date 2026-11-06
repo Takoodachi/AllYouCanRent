@@ -31,9 +31,7 @@ const API = (() => {
     try { data = text ? JSON.parse(text) : null; } catch (e) { /* plain-text reply */ }
     if (!res.ok) {
       const why = (data && typeof data === "object" && (data.message || data.error)) || (typeof data === "string" && data) || res.statusText;
-      const err = new Error(`${why} (HTTP ${res.status})`);
-      err.status = res.status;
-      throw err;
+      throw Object.assign(new Error(`${why} (HTTP ${res.status})`), { status: res.status });
     }
     return data;
   }
@@ -42,7 +40,7 @@ const API = (() => {
   const del = p => request("DELETE", p);
   const q = obj => "?" + Object.entries(obj).filter(([, v]) => v !== undefined && v !== "")
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
-  // The spec types dateSent as format "date", so send YYYY-MM-DD with no time.
+  // dateSent is a plain date (yyyy-mm-dd); the server rejects a time with HTTP 400.
   const now = () => { const d = new Date(), p = n => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 
@@ -111,6 +109,8 @@ const API = (() => {
     // → [{setId, bundleId, bundleName, dailyCharge, cleaningFee, items:[{itemId, productName, depreciatedValue}]}]
     availableSets: (bundleId, startDate, endDate) =>
       get("/sets/available" + q({ bundleId, startDate, endDate })),
+    // shortcut: the server can't list a bundle's sets, so count the ones free on a far-future date (all of them).
+    countSets: bundleId => get("/sets/available" + q({ bundleId, startDate: "2099-01-01", endDate: "2099-01-02" })).then(s => (s || []).length),
 
     /* ---------- reservations ---------- */
     reserve: (customerId, { setId, startDate, endDate }) =>

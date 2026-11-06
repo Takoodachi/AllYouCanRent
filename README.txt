@@ -19,6 +19,12 @@ NOTES
   - The server has no set names, so the apps letter each bundle's sets (Set A, Set B...) in id order.
     Adding a set can shift the letters of that bundle's other sets.
   - The lost-item form lists the set's items once the set is returned.
+  - GET /reservations only returns the given user's own reservations, so staff open a
+    customer's reservation by the number the customer shows them.
+  - The server can't list sets or users. Set counts come from /sets/available on a far-future
+    date (every set is free then). Employee, manager and customer accounts can't be counted.
+  - Reviews are refused (HTTP 403) until the customer has rented and returned that bundle.
+  - Message dates (dateSent) must be yyyy-mm-dd.
 
 FILES
   css/style.css   shared look

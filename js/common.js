@@ -3,9 +3,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = n => "$" + (Number(n) || 0).toFixed(2);
-/* Ids are long UUIDs: show the first 8 characters, keep the whole id in a hover title. */
 const shortId = id => String(id ?? "").slice(0, 8);
-const idTag = id => `<span title="${esc(id)}">${esc(shortId(id))}</span>`;
 /* "Set A", with the full id on hover. Falls back to the short id if the letter isn't known. */
 const setLabel = (setId, letter) => `<span title="${esc(setId)}">Set ${esc(letter || shortId(setId))}</span>`;
 const setName = (bundleName, setId, letter) => `${bundleName ? esc(bundleName) + ", " : ""}${setLabel(setId, letter)}`;

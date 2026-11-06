@@ -138,10 +138,11 @@ async function loadBundles() {
   const box = $("#blist");
   try {
     const bs = await API.listBundles();
-    const full = await Promise.all(bs.map(b => API.getBundle(b.bundleId).catch(() => b)));
+    const full = await Promise.all(bs.map(async b => ({
+      ...(await API.getBundle(b.bundleId).catch(() => b)), sets: await API.countSets(b.bundleId).catch(() => null) })));
     box.innerHTML = full.length ? full.map(b => `<div class="inbox-item"><div class="row between"><b>${esc(b.name)}</b>
       ${b.dailyCharge != null ? `<span class="price">${money(b.dailyCharge)}/day</span>` : ""}</div>
-      <span class="small muted">${(b.products || []).length} items · ${(b.tags || []).map(t => "#" + esc(t)).join(" ")} · id ${esc(b.bundleId)}</span></div>`).join("")
+      <span class="small muted">${(b.products || []).length} items · ${b.sets != null ? `<b>${b.sets} set${b.sets === 1 ? "" : "s"}</b> · ` : ""}${(b.tags || []).map(t => "#" + esc(t)).join(" ")} · id ${esc(b.bundleId)}</span></div>`).join("")
       : `<p class="empty">No bundles yet.</p>`;
   } catch (e) { box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
