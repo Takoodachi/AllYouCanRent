@@ -102,6 +102,16 @@ function bundleArt(b, seed = 1) {
     <path d="${ridge(130, 60, 7)}" fill="${pal[2]}" opacity=".8"/><path d="${ridge(175, 40, 9)}" fill="${pal[2]}"/><path d="${ridge(205, 18, 12)}" fill="${pal[3]}"/></svg>`;
 }
 
+/* Readable set name made from the set id, the same in every app. The server stores no set names.
+   shortcut: 256 names, so two sets can share one (rare), upgrade if the server gets a set name field. */
+const SET_WORDS = [["Alpine", "Aspen", "Birch", "Boulder", "Canyon", "Cedar", "Copper", "Granite", "Juniper", "Maple", "Pine", "River", "Sage", "Summit", "Timber", "Willow"],
+  ["Basin", "Bluff", "Creek", "Falls", "Grove", "Hollow", "Lake", "Meadow", "Mesa", "Pass", "Peak", "Point", "Ridge", "Spring", "Trail", "Valley"]];
+function setName(id) {
+  let h = 5381;
+  for (const c of String(id)) h = (h * 33 + c.charCodeAt(0)) >>> 0;
+  return `${SET_WORDS[0][h % 16]} ${SET_WORDS[1][(h >>> 4) % 16]} set`;
+}
+
 /* Product image if it has one, otherwise the illustration. */
 function bundleImage(b, seed) {
   const img = (b.products || []).map(p => p.imageUrl).find(u => u && /^https?:\/\//.test(u));
