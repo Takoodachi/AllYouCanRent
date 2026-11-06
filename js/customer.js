@@ -126,7 +126,12 @@ async function viewBundle(id) {
   </div>`;
 
   onSubmit($("#review-form"), async d => {
-    await API.postReview(me.userId, { bundleId: b.bundleId, rating: +d.rating, content: d.content.trim() });
+    try {
+      await API.postReview(me.userId, { bundleId: b.bundleId, rating: +d.rating, content: d.content.trim() });
+    } catch (err) {
+      if (err.status === 403) throw new Error("You can review this bundle after you've rented and returned it.");
+      throw err;
+    }
     toast("Review posted"); viewBundle(id);
   });
   onSubmit($("#avail-form"), async d => {
@@ -135,9 +140,10 @@ async function viewBundle(id) {
     const box = $("#sets");
     if (!sets || !sets.length) { box.innerHTML = `<div class="card pad empty">No sets are free from ${esc(d.startDate)} to ${esc(d.endDate)}. Try other dates.</div>`; return; }
     const nDays = Math.max(1, Math.round((Date.parse(d.endDate) - Date.parse(d.startDate)) / 864e5));
+    const letters = await API.setLetters(b.bundleId);
     box.innerHTML = `<div class="card pad stack"><h3>${sets.length} set${sets.length > 1 ? "s" : ""} available</h3>
       ${sets.map((s, i) => `<div class="row between" style="border-top:${i ? "1px solid var(--line)" : "0"};padding-top:${i ? "12px" : "0"}">
-        <div><b>Set ${esc(s.setId)}</b><br><span class="small muted">${s.dailyCharge != null ? `${money(s.dailyCharge)} × ${nDays} day${nDays > 1 ? "s" : ""}` : ""}${s.cleaningFee != null ? ` + ${money(s.cleaningFee)} cleaning fee` : ""}</span></div>
+        <div><b>${setLabel(s.setId, letters.get(String(s.setId)))}</b><br><span class="small muted">${s.dailyCharge != null ? `${money(s.dailyCharge)} × ${nDays} day${nDays > 1 ? "s" : ""}` : ""}${s.cleaningFee != null ? ` + ${money(s.cleaningFee)} cleaning fee` : ""}</span></div>
         <button type="button" class="btn btn-orange btn-sm" data-set="${esc(s.setId)}">Reserve</button></div>`).join("")}
       <p class="small muted">You pay at the store when you return the set. Lost or damaged items are added to your invoice.</p>
       <div data-msg hidden id="res-msg"></div></div>`;
@@ -147,8 +153,8 @@ async function viewBundle(id) {
       try {
         const r = await API.reserve(me.userId, { setId: btn.dataset.set, startDate: d.startDate, endDate: d.endDate });
         box.innerHTML = `<div class="card pad stack" style="border:2px solid var(--green)">
-          <p class="eyebrow">Reserved</p><h2>Reservation ${esc(r.id)}</h2>
-          <p>${esc(b.name)}, set ${esc(btn.dataset.set)}<br>${esc(d.startDate)} to ${esc(d.endDate)}</p>
+          <p class="eyebrow">Reserved</p><h2>Reservation ${idTag(r.id)}</h2>
+          <p>${setName(b.name, btn.dataset.set, letters.get(btn.dataset.set))}<br>${esc(d.startDate)} to ${esc(d.endDate)}</p>
           <p class="small muted">Show this reservation number at the store to pick up your gear.</p>
           <a class="btn btn-ghost" href="#reservations">View my reservations</a></div>`;
       } catch (err) { say($("#res-msg"), "err", err.message); btn.disabled = false; }
@@ -162,8 +168,9 @@ async function viewReservations() {
     <p class="muted small" style="margin-bottom:18px">Bring the reservation number to the store to pick up your gear.</p><div id="rlist"><p class="muted">Loading…</p></div>`;
   try {
     const list = await API.listReservations(me.userId);
+    const letters = await Promise.all((list || []).map(r => API.setLetter(r.bundleName, r.setId)));
     $("#rlist").innerHTML = list && list.length ? `<div class="card pad tbl-wrap"><table class="tbl"><thead><tr><th>Reservation</th><th>Bundle</th><th>Set</th><th>Dates</th><th>Status</th></tr></thead><tbody>
-      ${list.map(r => `<tr><td><b>${esc(r.reservationId)}</b></td><td>${esc(r.bundleName)}</td><td>${esc(r.setId)}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
+      ${list.map((r, i) => `<tr><td><b>${idTag(r.reservationId)}</b></td><td>${esc(r.bundleName)}</td><td>${setLabel(r.setId, letters[i])}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="card empty stack"><p>No reservations yet.</p><div><a class="btn btn-green" href="#browse">Browse bundles</a></div></div>`;
   } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }

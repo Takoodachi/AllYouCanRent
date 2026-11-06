@@ -16,6 +16,8 @@ NOTES
   - Bundle prices (dailyCharge) are calculated by the server from the products:
     each product costs (cost when new / lifetime in days) per day, so a shorter lifetime means a higher price.
   - The server can't edit or delete bundles. Old bundles are hidden by id in js/api.js (RETIRED_BUNDLES).
+  - The server has no set names, so the apps letter each bundle's sets (Set A, Set B...) in id order.
+    Adding a set can shift the letters of that bundle's other sets.
   - The lost-item form lists the set's items once the set is returned.
 
 FILES

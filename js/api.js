@@ -31,7 +31,9 @@ const API = (() => {
     try { data = text ? JSON.parse(text) : null; } catch (e) { /* plain-text reply */ }
     if (!res.ok) {
       const why = (data && typeof data === "object" && (data.message || data.error)) || (typeof data === "string" && data) || res.statusText;
-      throw new Error(`${why} (HTTP ${res.status})`);
+      const err = new Error(`${why} (HTTP ${res.status})`);
+      err.status = res.status;
+      throw err;
     }
     return data;
   }
@@ -40,8 +42,9 @@ const API = (() => {
   const del = p => request("DELETE", p);
   const q = obj => "?" + Object.entries(obj).filter(([, v]) => v !== undefined && v !== "")
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
+  // The spec types dateSent as format "date", so send YYYY-MM-DD with no time.
   const now = () => { const d = new Date(), p = n => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 
   /* privilegeLevel from /users/login → "manager" | "employee" | "customer" */
   function roleOf(level) {
@@ -51,8 +54,34 @@ const API = (() => {
     return "customer";
   }
 
+  /* Set letters (A, B, C...). The server stores no set names and has no "list sets" call, but a
+     far-future search returns every set of a bundle, booked or not, so all browsers get the same letters.
+     shortcut: adding a set can shift letters, because the order comes from the set's random id. */
+  const letterOf = i => (i >= 26 ? letterOf(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + i % 26);
+  const lettersByBundle = {};
+  function setLetters(bundleId) {
+    if (!lettersByBundle[bundleId]) {
+      lettersByBundle[bundleId] = get("/sets/available" + q({ bundleId, startDate: "2099-01-01", endDate: "2099-01-02" }))
+        .then(sets => new Map((sets || []).map(s => String(s.setId)).sort().map((id, i) => [id, letterOf(i)])))
+        .catch(() => { delete lettersByBundle[bundleId]; return new Map(); });
+    }
+    return lettersByBundle[bundleId];
+  }
+  /* Reservations only give the bundle's name, and names repeat (hidden old bundles included), so try each match.
+     Resolves to null if the letter can't be worked out; callers then show the short id. */
+  async function setLetter(bundleName, setId) {
+    try {
+      const bundles = await get("/bundles");
+      for (const b of (bundles || []).filter(x => x.name === bundleName)) {
+        const letter = (await setLetters(b.bundleId)).get(String(setId));
+        if (letter) return letter;
+      }
+    } catch (e) { /* fall through to the short id */ }
+    return null;
+  }
+
   return {
-    BASE_URL, roleOf,
+    BASE_URL, roleOf, setLetters, setLetter,
 
     /* ---------- users ---------- (all return {id}) */
     createCustomer: ({ userName, realName, phoneNumber, password }) =>
@@ -78,7 +107,7 @@ const API = (() => {
     getBundle: id => get(`/bundles/${encodeURIComponent(id)}`),         // → {bundleId, name, dailyCharge, tags, products[], reviews[]}
     listTags: () => get("/tags"),                                         // → ["camping", ...]
     createSet: (staffId, { bundleId, cleaningFee }) =>
-      post("/sets", { userId: staffId, bundleId, cleaningFee }),
+      post("/sets", { userId: staffId, bundleId, cleaningFee }).then(r => { delete lettersByBundle[bundleId]; return r; }),
     // → [{setId, bundleId, bundleName, dailyCharge, cleaningFee, items:[{itemId, productName, depreciatedValue}]}]
     availableSets: (bundleId, startDate, endDate) =>
       get("/sets/available" + q({ bundleId, startDate, endDate })),

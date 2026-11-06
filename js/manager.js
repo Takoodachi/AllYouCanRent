@@ -165,7 +165,8 @@ async function viewSets() {
   onSubmit($("#set-form"), async d => {
     const made = [];
     for (let i = 0; i < Math.max(1, +d.count); i++) made.push((await API.createSet(me.userId, { bundleId: d.bundleId, cleaningFee: +d.cleaningFee })).id);
-    return `Created ${made.length} set${made.length > 1 ? "s" : ""}: ${made.join(", ")}.`;
+    const letters = await API.setLetters(d.bundleId);
+    return `Created ${made.length} ${$("#set-bundle").selectedOptions[0].text} set${made.length > 1 ? "s" : ""}: ${made.map(id => letters.get(String(id)) || shortId(id)).join(", ")}.`;
   });
 }
 
