@@ -13,7 +13,9 @@ Master password for new managers: RentalMaster106!
 NOTES
   - The server has no "list products" call, so the manager app builds its product list
     from existing bundles plus products created in that browser.
-  - Bundle prices (dailyCharge) are calculated by the server from the products.
+  - Bundle prices (dailyCharge) are calculated by the server from the products:
+    each product costs (cost when new / lifetime in days) per day, so a shorter lifetime means a higher price.
+  - The server can't edit or delete bundles. Old bundles are hidden by id in js/api.js (RETIRED_BUNDLES).
   - The lost-item form lists the set's items once the set is returned.
 
 FILES
