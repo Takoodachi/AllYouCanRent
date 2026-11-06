@@ -52,8 +52,34 @@ const API = (() => {
     return "customer";
   }
 
+  /* Set letters (A, B, C...). The server stores no set names and has no "list sets" call, but a
+     far-future search returns every set of a bundle, booked or not, so all browsers get the same letters.
+     shortcut: adding a set can shift letters, because the order comes from the set's random id. */
+  const letterOf = i => (i >= 26 ? letterOf(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + i % 26);
+  const lettersByBundle = {};
+  function setLetters(bundleId) {
+    if (!lettersByBundle[bundleId]) {
+      lettersByBundle[bundleId] = get("/sets/available" + q({ bundleId, startDate: "2099-01-01", endDate: "2099-01-02" }))
+        .then(sets => new Map((sets || []).map(s => String(s.setId)).sort().map((id, i) => [id, letterOf(i)])))
+        .catch(() => { delete lettersByBundle[bundleId]; return new Map(); });
+    }
+    return lettersByBundle[bundleId];
+  }
+  /* Reservations only give the bundle's name, and names repeat (hidden old bundles included), so try each match.
+     Resolves to null if the letter can't be worked out; callers then show the short id. */
+  async function setLetter(bundleName, setId) {
+    try {
+      const bundles = await get("/bundles");
+      for (const b of (bundles || []).filter(x => x.name === bundleName)) {
+        const letter = (await setLetters(b.bundleId)).get(String(setId));
+        if (letter) return letter;
+      }
+    } catch (e) { /* fall through to the short id */ }
+    return null;
+  }
+
   return {
-    BASE_URL, roleOf,
+    BASE_URL, roleOf, setLetters, setLetter,
 
     /* ---------- users ---------- (all return {id}) */
     createCustomer: ({ userName, realName, phoneNumber, password }) =>
@@ -79,7 +105,7 @@ const API = (() => {
     getBundle: id => get(`/bundles/${encodeURIComponent(id)}`),         // → {bundleId, name, dailyCharge, tags, products[], reviews[]}
     listTags: () => get("/tags"),                                         // → ["camping", ...]
     createSet: (staffId, { bundleId, cleaningFee }) =>
-      post("/sets", { userId: staffId, bundleId, cleaningFee }),
+      post("/sets", { userId: staffId, bundleId, cleaningFee }).then(r => { delete lettersByBundle[bundleId]; return r; }),
     // → [{setId, bundleId, bundleName, dailyCharge, cleaningFee, items:[{itemId, productName, depreciatedValue}]}]
     availableSets: (bundleId, startDate, endDate) =>
       get("/sets/available" + q({ bundleId, startDate, endDate })),

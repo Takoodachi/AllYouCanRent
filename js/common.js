@@ -3,6 +3,10 @@
 const $ = (s, root = document) => root.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = n => "$" + (Number(n) || 0).toFixed(2);
+const shortId = id => String(id ?? "").slice(0, 8);
+/* "Set A", with the full id on hover. Falls back to the short id if the letter isn't known. */
+const setLabel = (setId, letter) => `<span title="${esc(setId)}">Set ${esc(letter || shortId(setId))}</span>`;
+const setName = (bundleName, setId, letter) => `${bundleName ? esc(bundleName) + ", " : ""}${setLabel(setId, letter)}`;
 const today = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 const addDays = (d, n) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
 const store = {
@@ -100,16 +104,6 @@ function bundleArt(b, seed = 1) {
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${pal[0]}"/><stop offset="1" stop-color="${pal[1]}"/></linearGradient></defs>
     <rect width="400" height="225" fill="url(#${id})"/><circle cx="${300 + r(3) * 60}" cy="48" r="16" fill="#fff6d8" opacity=".85"/>
     <path d="${ridge(130, 60, 7)}" fill="${pal[2]}" opacity=".8"/><path d="${ridge(175, 40, 9)}" fill="${pal[2]}"/><path d="${ridge(205, 18, 12)}" fill="${pal[3]}"/></svg>`;
-}
-
-/* Readable set name made from the set id, the same in every app. The server stores no set names.
-   shortcut: 256 names, so two sets can share one (rare), upgrade if the server gets a set name field. */
-const SET_WORDS = [["Alpine", "Aspen", "Birch", "Boulder", "Canyon", "Cedar", "Copper", "Granite", "Juniper", "Maple", "Pine", "River", "Sage", "Summit", "Timber", "Willow"],
-  ["Basin", "Bluff", "Creek", "Falls", "Grove", "Hollow", "Lake", "Meadow", "Mesa", "Pass", "Peak", "Point", "Ridge", "Spring", "Trail", "Valley"]];
-function setName(id) {
-  let h = 5381;
-  for (const c of String(id)) h = (h * 33 + c.charCodeAt(0)) >>> 0;
-  return `${SET_WORDS[0][h % 16]} ${SET_WORDS[1][(h >>> 4) % 16]} set`;
 }
 
 /* Product image if it has one, otherwise the illustration. */
