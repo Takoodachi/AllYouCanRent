@@ -63,14 +63,33 @@ async function viewBrowse() {
     const full = await Promise.all(list.map(b => API.getBundle(b.bundleId).catch(() => b)));
     $("#list").innerHTML = `<div class="cards">${full.map(b => {
       const n = (b.reviews || []).length, avg = n ? (b.reviews.reduce((s, r) => s + (+r.rating || 0), 0) / n).toFixed(1) : null;
-      return `<a class="card bcard" href="#bundle-${encodeURIComponent(b.bundleId)}"><div class="art">${bundleImage(b, b.bundleId)}</div><div class="body">
-        <h3>${esc(b.name)}</h3>
+      return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div><div class="body">
+        <h3><a href="#bundle-${encodeURIComponent(b.bundleId)}">${esc(b.name)}</a></h3>
         <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
-        <p class="small muted">${(b.products || []).map(p => esc(p.name)).join(" · ")}</p>
+        <p class="small muted">${seeMore(itemSummary(b))}</p>
         <div class="row between" style="margin-top:auto">${b.dailyCharge != null ? `<span><span class="price">${money(b.dailyCharge)}</span><span class="small muted"> / day</span></span>` : "<span></span>"}
-        <span class="small">${avg ? `<span class="stars">★</span> ${avg} <span class="muted">(${n})</span>` : `<span class="muted">No reviews yet</span>`}</span></div></div></a>`;
+        <span class="small">${avg ? `<span class="stars">★</span> ${avg} <span class="muted">(${n})</span>` : `<span class="muted">No reviews yet</span>`}</span></div></div></div>`;
     }).join("")}</div>`;
+    $("#list").onclick = e => {
+      const btn = e.target.closest("[data-more]"); if (!btn) return;
+      const open = btn.textContent === "See more";
+      btn.previousElementSibling.hidden = !open; btn.previousElementSibling.previousElementSibling.hidden = open;
+      btn.textContent = open ? "See less" : "See more";
+    };
   } catch (e) { $("#list").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+/* "2× Sleeping bag · Tent", counting repeated items once. */
+function itemSummary(b) {
+  const count = new Map();
+  (b.products || []).forEach(p => count.set(p.name, (count.get(p.name) || 0) + 1));
+  return [...count].map(([name, n]) => (n > 1 ? n + "× " : "") + name).join(" · ");
+}
+/* Text cut to max characters with a See more toggle (wired in viewBrowse). */
+function seeMore(text, max = 90) {
+  if (text.length <= max) return esc(text);
+  const cut = text.slice(0, max), at = cut.lastIndexOf(" · ");  // end on a whole item when we can
+  return `<span>${esc(at > 0 ? cut.slice(0, at) : cut.replace(/\s+\S*$/, ""))}…</span><span hidden>${esc(text)}</span> <button type="button" class="more" data-more>See more</button>`;
 }
 
 /* ---------- bundle details, availability, reserve, review ---------- */
@@ -126,7 +145,13 @@ async function viewBundle(id) {
   </div>`;
 
   onSubmit($("#review-form"), async d => {
-    await API.postReview(me.userId, { bundleId: b.bundleId, rating: +d.rating, content: d.content.trim() });
+    try {
+      await API.postReview(me.userId, { bundleId: b.bundleId, rating: +d.rating, content: d.content.trim() });
+    } catch (e) {
+      // The server only takes reviews from customers who rented this bundle and returned the set.
+      if (e.status === 403) throw new Error("You can review this bundle after you've rented it and returned the set to the store.");
+      throw e;
+    }
     toast("Review posted"); viewBundle(id);
   });
   onSubmit($("#avail-form"), async d => {
@@ -137,7 +162,7 @@ async function viewBundle(id) {
     const nDays = Math.max(1, Math.round((Date.parse(d.endDate) - Date.parse(d.startDate)) / 864e5));
     box.innerHTML = `<div class="card pad stack"><h3>${sets.length} set${sets.length > 1 ? "s" : ""} available</h3>
       ${sets.map((s, i) => `<div class="row between" style="border-top:${i ? "1px solid var(--line)" : "0"};padding-top:${i ? "12px" : "0"}">
-        <div><b>Set ${esc(s.setId)}</b><br><span class="small muted">${s.dailyCharge != null ? `${money(s.dailyCharge)} × ${nDays} day${nDays > 1 ? "s" : ""}` : ""}${s.cleaningFee != null ? ` + ${money(s.cleaningFee)} cleaning fee` : ""}</span></div>
+        <div><b>${esc(setName(s.setId))}</b><br><span class="small muted">${s.dailyCharge != null ? `${money(s.dailyCharge)} × ${nDays} day${nDays > 1 ? "s" : ""}` : ""}${s.cleaningFee != null ? ` + ${money(s.cleaningFee)} cleaning fee` : ""}</span></div>
         <button type="button" class="btn btn-orange btn-sm" data-set="${esc(s.setId)}">Reserve</button></div>`).join("")}
       <p class="small muted">You pay at the store when you return the set. Lost or damaged items are added to your invoice.</p>
       <div data-msg hidden id="res-msg"></div></div>`;
@@ -148,7 +173,7 @@ async function viewBundle(id) {
         const r = await API.reserve(me.userId, { setId: btn.dataset.set, startDate: d.startDate, endDate: d.endDate });
         box.innerHTML = `<div class="card pad stack" style="border:2px solid var(--green)">
           <p class="eyebrow">Reserved</p><h2>Reservation ${esc(r.id)}</h2>
-          <p>${esc(b.name)}, set ${esc(btn.dataset.set)}<br>${esc(d.startDate)} to ${esc(d.endDate)}</p>
+          <p>${esc(b.name)}, ${esc(setName(btn.dataset.set))}<br>${esc(d.startDate)} to ${esc(d.endDate)}</p>
           <p class="small muted">Show this reservation number at the store to pick up your gear.</p>
           <a class="btn btn-ghost" href="#reservations">View my reservations</a></div>`;
       } catch (err) { say($("#res-msg"), "err", err.message); btn.disabled = false; }
@@ -163,7 +188,7 @@ async function viewReservations() {
   try {
     const list = await API.listReservations(me.userId);
     $("#rlist").innerHTML = list && list.length ? `<div class="card pad tbl-wrap"><table class="tbl"><thead><tr><th>Reservation</th><th>Bundle</th><th>Set</th><th>Dates</th><th>Status</th></tr></thead><tbody>
-      ${list.map(r => `<tr><td><b>${esc(r.reservationId)}</b></td><td>${esc(r.bundleName)}</td><td>${esc(r.setId)}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
+      ${list.map(r => `<tr><td><b>${esc(r.reservationId)}</b></td><td>${esc(r.bundleName)}</td><td>${esc(setName(r.setId))}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="card empty stack"><p>No reservations yet.</p><div><a class="btn btn-green" href="#browse">Browse bundles</a></div></div>`;
   } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
