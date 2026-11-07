@@ -8,14 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="css/style.css">
+<!-- Apply the saved light/dark choice before the page draws (see Theme in js/common.js) -->
+<script>try { var t = JSON.parse(localStorage.getItem("rental:theme")); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
 <header class="top" id="header"></header>
-<div class="shop">
-  <aside class="ad-rail" id="ads-left" aria-label="Featured bundles"></aside>
-  <main><div class="wrap" id="app"></div></main>
-  <aside class="ad-rail" id="ads-right" aria-label="More featured bundles"></aside>
-</div>
+<main><div class="wrap" id="app"></div></main>
 <footer class="wrap small muted" style="padding-block:28px">Store staff: <a href="employee.html">Employee log in</a> · <a href="manager.html">Manager log in</a></footer>
 <div class="toast" id="toast" hidden></div>
 <script src="js/api.js"></script>

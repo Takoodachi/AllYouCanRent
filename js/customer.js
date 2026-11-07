@@ -11,7 +11,7 @@ function drawHeader(h) {
   if (!me) {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = "Log in"; b.onclick = () => needLogin(route);
-    $("#header nav.main").appendChild(b);
+    $("#header nav.main").insertBefore(b, $("#theme-btn"));  // keep the theme switch last
   }
 }
 function route() {
@@ -83,45 +83,65 @@ function showSignup() {
 }
 
 /* ---------- browse ---------- */
+const label = t => t.charAt(0).toUpperCase() + t.slice(1);  // "cross-country ski" → "Cross-country ski"
+
 async function viewBrowse() {
   $("#app").innerHTML = `<div class="stack" style="margin-bottom:20px">
       <p class="eyebrow">${me ? `Hi ${esc(me.userName)}` : "Outdoor gear rental"}</p>
       <h1>Browse bundles</h1>
-      <input class="in" type="search" id="search" value="${esc(state.q || "")}" aria-label="Search bundles"
-        placeholder="Search bundles, gear or activities">
-      <div class="row" id="tags"><span class="muted small">Loading tags…</span></div>
+      <div class="filters">
+        <input class="in" type="search" id="search" value="${esc(state.q || "")}" aria-label="Search bundles"
+          placeholder="Search bundles, gear or activities">
+        <select class="in" id="activity" aria-label="Filter by activity"><option value="">All activities</option></select>
+      </div>
+      <div class="row between"><div class="row" id="popular"></div><span class="small muted" id="count"></span></div>
     </div>
     <div id="list"><p class="muted">Loading bundles…</p></div>`;
   try {
-    const tags = await API.listTags();
-    $("#tags").innerHTML = [`<button type="button" class="chip ${state.tag ? "" : "on"}" data-tag="">All</button>`]
-      .concat((tags || []).map(t => `<button type="button" class="chip ${state.tag === t ? "on" : ""}" data-tag="${esc(t)}">#${esc(t)}</button>`)).join("");
-    $("#tags").onclick = e => { const b = e.target.closest("[data-tag]"); if (b) { state.tag = b.dataset.tag; viewBrowse(); } };
-  } catch (e) { $("#tags").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
-  try {
-    const list = await API.listBundles(state.tag);
-    if (!list || !list.length) { $("#list").innerHTML = `<div class="card empty">No bundles${state.tag ? " with #" + esc(state.tag) : ""} yet.</div>`; return; }
-    // The list only has ids and names, so load each bundle's details for the cards.
+    const list = await API.listBundles();
+    if (!list || !list.length) { $("#list").innerHTML = `<div class="card empty">No bundles yet.</div>`; return; }
+    // The list only has ids and names, so load each bundle's details once, then filter here.
     const full = await Promise.all(list.map(b => API.getBundle(b.bundleId).catch(() => b)));
-    // Search runs on the loaded bundles: every word must appear in the name, a tag or an item.
+    // Activities come from the bundles on show, so every choice has results. Most used first.
+    const uses = new Map();
+    full.forEach(b => (b.tags || []).forEach(t => uses.set(t, (uses.get(t) || 0) + 1)));
+    const byUse = [...uses.keys()].sort((a, b) => uses.get(b) - uses.get(a) || a.localeCompare(b));
+    if (!uses.has(state.tag)) state.tag = "";
+    $("#activity").innerHTML += [...uses.keys()].sort()
+      .map(t => `<option value="${esc(t)}">${esc(label(t))} (${uses.get(t)})</option>`).join("");
+
+    // Every word of the search must appear in the bundle's name, a tag or an item.
     const draw = () => {
       state.q = $("#search").value;
+      $("#activity").value = state.tag;
+      const quick = byUse.slice(0, 6);
+      if (state.tag && !quick.includes(state.tag)) quick.push(state.tag);
+      $("#popular").innerHTML = `<span class="small muted">Popular:</span>` + quick.map(t =>
+        `<button type="button" class="chip ${state.tag === t ? "on" : ""}" data-tag="${esc(t)}" aria-pressed="${state.tag === t}">${esc(label(t))}</button>`).join("");
       const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
       const shown = full.filter(b => {
         const text = [b.name, ...(b.tags || []), ...(b.products || []).map(p => p.name)].join(" ").toLowerCase();
-        return words.every(w => text.includes(w));
+        return (!state.tag || (b.tags || []).includes(state.tag)) && words.every(w => text.includes(w));
       });
+      $("#count").textContent = `${shown.length} of ${full.length} bundles`;
       $("#list").innerHTML = shown.length ? `<div class="cards">${shown.map(bundleCard).join("")}</div>`
-        : `<div class="card empty">No bundles match “${esc(state.q)}”${state.tag ? " in #" + esc(state.tag) : ""}.</div>`;
+        : `<div class="card empty">No bundles match your search. <button type="button" class="more" data-clear>Clear filters</button></div>`;
     };
     $("#search").oninput = draw;
-    draw();
+    $("#activity").onchange = e => { state.tag = e.target.value; draw(); };
+    $("#popular").onclick = e => {
+      const b = e.target.closest("[data-tag]"); if (!b) return;
+      state.tag = state.tag === b.dataset.tag ? "" : b.dataset.tag;  // clicking the active one clears it
+      draw();
+    };
     $("#list").onclick = e => {
+      if (e.target.closest("[data-clear]")) { state.tag = ""; $("#search").value = ""; return draw(); }
       const btn = e.target.closest("[data-more]"); if (!btn) return;
       const open = btn.textContent === "See more";
       btn.previousElementSibling.hidden = !open; btn.previousElementSibling.previousElementSibling.hidden = open;
       btn.textContent = open ? "See less" : "See more";
     };
+    draw();
   } catch (e) { $("#list").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
 
@@ -133,33 +153,6 @@ function bundleCard(b) {
     <p class="small muted">${seeMore(itemSummary(b))}</p>
     <div class="row between" style="margin-top:auto">${b.dailyCharge != null ? `<span><span class="price">${money(b.dailyCharge)}</span><span class="small muted"> / day</span></span>` : "<span></span>"}
     <span class="small">${avg ? `<span class="stars">★</span> ${avg} <span class="muted">(${n})</span>` : `<span class="muted">No reviews yet</span>`}</span></div></div></div>`;
-}
-
-/* ---------- side ads for popular bundles (shown on wide screens) ---------- */
-const ADS = [
-  { name: "Weekend Camping for Two", badge: "Most rented", line: "Tent, sleeping bags and a stove. Just bring the marshmallows." },
-  { name: "Kayak Day Trip", badge: "Summer favorite", line: "On the water by lunch: kayak, paddle, life jacket and dry bag." },
-  { name: "Ski Day", badge: "Skip the rental line", line: "Skis, boots, poles and a helmet, ready the night before." },
-  { name: "Family Car Camping", badge: "Families love it", line: "A 6-person tent, beds for four and chairs around the fire." }
-];
-async function renderAds() {
-  const left = $("#ads-left"), right = $("#ads-right");
-  if (!left || !right) return;
-  try {
-    const list = await API.listBundles();
-    const ads = (await Promise.all(ADS.map(async a => {
-      const b = list.find(x => x.name === a.name);
-      return b ? { ...a, ...(await API.getBundle(b.bundleId)) } : null;
-    }))).filter(Boolean);
-    const ad = a => `<a class="ad" href="#bundle-${encodeURIComponent(a.bundleId)}">
-      <div class="art">${bundleImage(a, a.bundleId)}</div>
-      <div class="body"><span class="ad-label">Ad</span><span class="badge">${esc(a.badge)}</span>
-        <h3>${esc(a.name)}</h3><p class="small muted">${esc(a.line)}</p>
-        <span><span class="price">${money(a.dailyCharge)}</span><span class="small muted"> / day</span></span>
-        <span class="btn btn-orange btn-sm">Rent it</span></div></a>`;
-    left.innerHTML = ads.slice(0, 2).map(ad).join("");
-    right.innerHTML = ads.slice(2, 4).map(ad).join("");
-  } catch (e) { /* ads are extra; the shop works without them */ }
 }
 
 /* "2× Sleeping bag · Tent", counting repeated items once. */
@@ -318,4 +311,3 @@ async function loadInbox() {
 
 window.addEventListener("hashchange", route);
 route();
-renderAds();

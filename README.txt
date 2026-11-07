@@ -4,8 +4,7 @@ Open index.html in a browser. It is the shop, and its footer links to the staff 
   index.html     - browse bundles by tag (no account needed). A log-in pop-up opens when a customer
                    reserves, reviews, or opens My reservations or Messages.
                    (customer.html just redirects here, so old links still work.)
-                   A search box filters bundles by name, tag or gear. On wide screens, side ads promote
-                   the bundles listed in ADS in js/customer.js (matched by bundle name).
+                   A search box and an activity filter narrow the bundles by name, tag or gear.
   employee.html  - check out / return sets, repair charges, lost items, invoices, messages
   manager.html   - create managers and employees, products, bundles and sets
 
@@ -29,6 +28,8 @@ NOTES
     date (every set is free then). Employee, manager and customer accounts can't be counted.
   - Reviews are refused (HTTP 403) until the customer has rented and returned that bundle.
   - Message dates (dateSent) must be yyyy-mm-dd.
+  - The sun/moon button in every header switches light and dark mode. The choice is saved in the
+    browser (localStorage "rental:theme"); without one, the site follows the device setting.
 
 FILES
   css/style.css   shared look
