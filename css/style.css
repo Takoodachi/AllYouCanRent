@@ -89,6 +89,12 @@ label.f .hint{font-weight:400;color:var(--muted);font-size:.8rem}
 .msg.err{background:var(--danger-soft);color:var(--danger)}
 .msg.info{background:var(--orange-soft);color:var(--orange-ink)}
 .auth{max-width:440px;margin:10px auto}
+dialog.modal{border:0;padding:0;background:transparent;color:var(--fg);width:min(440px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto}
+dialog.modal::backdrop{background:rgba(10,15,10,.55)}
+dialog.modal .auth{margin:0}
+.modal-x{position:absolute;top:8px;right:8px;z-index:1}
+.modal-x button{background:none;border:0;border-radius:8px;padding:4px 10px;font-size:1.5rem;line-height:1;color:var(--muted);cursor:pointer}
+.modal-x button:hover{background:var(--surface-2)}
 .tabs-inline{display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:12px;width:fit-content;max-width:100%;flex-wrap:wrap}
 .tabs-inline button{border:0;background:none;padding:8px 14px;border-radius:9px;font-weight:600;cursor:pointer;color:var(--muted)}
 .tabs-inline button.on{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
