@@ -58,6 +58,7 @@ Thanks to the photographers:
   Family Car Camping - Scott Goodwill
 
 FILES
+  favicon.svg     browser tab icon (the logo's mountains and sun)
   css/style.css   shared look
   js/api.js       every endpoint, in one place
   js/common.js    login, header, forms, helpers
