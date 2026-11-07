@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Tab icon: the site logo (mountains and sun), filled so it reads at 16px -->
+  <rect width="32" height="32" rx="7" fill="#3f7a2f"/>
+  <path d="M4 25 L13 10 L18 18 L21 13.5 L28 25 Z" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="23.5" cy="8" r="3" fill="#f5b46c"/>
+</svg>
