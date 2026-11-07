@@ -356,28 +356,43 @@ async function viewBundle(id) {
       btn.disabled = true;
       try {
         const r = await API.reserve(me.userId, { setId: btn.dataset.set, startDate: d.startDate, endDate: d.endDate });
+        const code = resCode(r.id);
+        const noted = await sendCodeNote(r.id, `${b.name}, ${d.startDate} to ${d.endDate}`);
         box.innerHTML = `<div class="card pad stack" style="border:2px solid var(--green)">
-          <p class="eyebrow">Reserved</p><h2>Reservation ${esc(r.id)}</h2>
+          <p class="eyebrow">Reserved</p><h2>Reservation code <span class="code">${esc(code)}</span></h2>
           <p>${esc(b.name)}, ${esc(setName(btn.dataset.set))}<br>${esc(d.startDate)} to ${esc(d.endDate)}</p>
-          <p class="small muted">Show this reservation number at the store to pick up your gear.</p>
-          <div class="row"><button type="button" class="btn btn-quiet" id="copy-res">Copy number</button>
+          <p class="small muted">Show this code at the store to pick up your gear. It's also under My reservations.</p>
+          ${noted ? "" : `<p class="small muted">If the store can't find the code, show them the full number: ${esc(r.id)}</p>`}
+          <div class="row"><button type="button" class="btn btn-quiet" id="copy-res">Copy code</button>
             <a class="btn btn-ghost" href="#reservations">View my reservations</a></div></div>`;
-        $("#copy-res").onclick = () => navigator.clipboard.writeText(String(r.id))
-          .then(() => toast("Reservation number copied"), () => toast("Couldn't copy. Select the number instead."));
+        $("#copy-res").onclick = () => navigator.clipboard.writeText(code)
+          .then(() => toast("Reservation code copied"), () => toast("Couldn't copy. Write the code down instead."));
       } catch (err) { say($("#res-msg"), "err", err.message); btn.disabled = false; }
     };
   });
 }
 
 /* ---------- my reservations ---------- */
+/* Send the store the note that links a short code to its reservation (see ResNote in common.js).
+   Reservations noted from this browser are remembered so each note goes once. → true if it's noted. */
+async function sendCodeNote(id, about) {
+  const noted = new Set(store.get("codeNotes", []));
+  if (noted.has(id)) return true;
+  try { await API.messageStore(me.userId, ResNote.text(id, about)); } catch (e) { return false; }
+  noted.add(id); store.set("codeNotes", [...noted]);
+  return true;
+}
+
 async function viewReservations() {
   $("#app").innerHTML = `<h1 style="margin-bottom:6px">My reservations</h1>
-    <p class="muted small" style="margin-bottom:18px">Bring the reservation number to the store to pick up your gear.</p><div id="rlist"><p class="muted">Loading…</p></div>`;
+    <p class="muted small" style="margin-bottom:18px">Show the code at the store to pick up your gear.</p><div id="rlist"><p class="muted">Loading…</p></div>`;
   try {
     const list = await API.listReservations(me.userId);
-    $("#rlist").innerHTML = list && list.length ? `<div class="card pad tbl-wrap"><table class="tbl"><thead><tr><th>Reservation</th><th>Bundle</th><th>Set</th><th>Dates</th><th>Status</th></tr></thead><tbody>
-      ${list.map(r => `<tr><td><b>${esc(r.reservationId)}</b></td><td>${esc(r.bundleName)}</td><td>${esc(setName(r.setId))}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
+    $("#rlist").innerHTML = list && list.length ? `<div class="card pad tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Bundle</th><th>Set</th><th>Dates</th><th>Status</th></tr></thead><tbody>
+      ${list.map(r => `<tr><td><b class="code" title="Full number: ${esc(r.reservationId)}">${esc(resCode(r.reservationId))}</b></td><td>${esc(r.bundleName)}</td><td>${esc(setName(r.setId))}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="card empty stack"><p>No reservations yet.</p><div><a class="btn btn-green" href="#browse">Browse bundles</a></div></div>`;
+    // Reservations made before codes existed (or whose note didn't send) get their note now, in the background.
+    (async () => { for (const r of list || []) await sendCodeNote(r.reservationId, `${r.bundleName}, ${r.startDate} to ${r.endDate}`); })();
   } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
 
