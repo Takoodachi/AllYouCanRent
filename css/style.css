@@ -93,6 +93,12 @@ label.f .hint{font-weight:400;color:var(--muted);font-size:.8rem}
 .auth{max-width:440px;margin:10px auto}
 dialog.modal{border:0;padding:0;background:transparent;color:var(--fg);width:min(440px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto}
 dialog.modal::backdrop{background:rgba(10,15,10,.55)}
+body:has(dialog[open]){overflow:hidden}  /* the page behind an open pop-up doesn't scroll */
+/* Password box with a Show/Hide button inside it */
+.pw{position:relative;display:block}
+.pw .in{padding-right:64px}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;border-radius:6px;padding:4px 8px;font:inherit;font-size:.82rem;font-weight:600;color:var(--green-ink);cursor:pointer}
+.pw-toggle:hover{background:var(--surface-2)}
 dialog.modal .auth{margin:0}
 .modal-x{position:absolute;top:8px;right:8px;z-index:1}
 .modal-x button{background:none;border:0;border-radius:8px;padding:4px 10px;font-size:1.5rem;line-height:1;color:var(--muted);cursor:pointer}
@@ -115,7 +121,7 @@ input[type="search"].in{padding-left:38px;background:var(--surface) url("data:im
 .bcard .art{aspect-ratio:16/9;background:var(--green-soft)}
 .bcard .art svg,.art-lg svg{display:block;width:100%;height:100%}
 .bcard .body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px;flex:1}
-.art-lg{border-radius:16px;overflow:hidden;aspect-ratio:16/8}
+.art-lg{border-radius:16px;overflow:hidden;aspect-ratio:16/8;background:var(--green-soft)}
 .tagline{display:flex;gap:6px;flex-wrap:wrap}
 .tagline span{font-size:.74rem;color:var(--muted);background:var(--surface-2);padding:2px 8px;border-radius:6px}
 

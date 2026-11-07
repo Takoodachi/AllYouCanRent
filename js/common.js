@@ -80,13 +80,33 @@ function renderHeader(appLabel, links, current, user, onLogout) {
   wireThemeButton();
 }
 
+/* Password box with a Show/Hide button. attrs go on the <input>. */
+const passwordInput = attrs => `<span class="pw"><input class="in" type="password" ${attrs}><button type="button" class="pw-toggle" aria-label="Show password">Show</button></span>`;
+document.addEventListener("click", e => {
+  const b = e.target.closest(".pw-toggle"); if (!b) return;
+  const input = b.previousElementSibling, show = input.type === "password";
+  input.type = show ? "text" : "password";
+  b.textContent = show ? "Hide" : "Show";
+  b.setAttribute("aria-label", show ? "Hide password" : "Show password");
+});
+
+/* Browser tab title for the current page. */
+const setTitle = page => { document.title = page ? `${page} · All you can rent` : "All you can rent"; };
+
+/* Keep an end date on or after its start date: moving the start past the end moves the end too. */
+function linkDates(start, end) {
+  const sync = () => { end.min = start.value; if (end.value < start.value) end.value = start.value; };
+  start.addEventListener("change", sync);
+  sync();
+}
+
 /* Login form shared by the three apps. */
 function loginView(title, extraHtml = "") {
   return `<div class="auth card pad stack">
     <h2>${esc(title)}</h2>
     <form class="stack" id="login-form">
-      <label class="f">User name<input class="in" name="userName" id="login-user" required autocomplete="username"></label>
-      <label class="f">Password<input class="in" name="password" id="login-pass" type="password" required autocomplete="current-password"></label>
+      <label class="f">User name<input class="in" name="userName" id="login-user" required autocomplete="username" autofocus></label>
+      <label class="f">Password${passwordInput(`name="password" id="login-pass" required autocomplete="current-password"`)}</label>
       <div data-msg hidden></div>
       <button class="btn btn-green btn-block" type="submit">Log in</button>
     </form>
@@ -169,8 +189,42 @@ const KitRequest = {
   }
 };
 
-/* Product image if it has one, otherwise the illustration. */
-function bundleImage(b, seed) {
-  const img = (b.products || []).map(p => p.imageUrl).find(u => u && /^https?:\/\//.test(u));
-  return img ? `<img src="${esc(img)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block">` : bundleArt(b, seed);
+/* Real photos for the shop's bundles, matched by bundle name. All are from Unsplash and free to use
+   under the Unsplash License (credits in README.txt). The value is the photo id on images.unsplash.com.
+   A bundle that isn't listed here (like a custom kit) gets the drawn scene instead. */
+const BUNDLE_PHOTOS = {
+  "Day Hike Starter": "photo-1661001159798-cb33db460f21",
+  "Bird Watching Walk": "photo-1675246198306-9ba2a1aee6de",
+  "Snowshoe Trek": "photo-1761470077541-fc357e8382df",
+  "Bouldering Starter": "photo-1516594905951-96326d2c3de6",
+  "Hammock Camping": "photo-1567496662086-7cba3cf0de3a",
+  "Beach Day": "photo-1771367530679-6b7f400834df",
+  "Cross-Country Ski Day": "photo-1587647033811-0d7d23a54626",
+  "Stargazing Night": "photo-1548124771-9f2040b66df8",
+  "Lake Fishing Day": "photo-1541742425281-c1d3fc8aff96",
+  "Surf Starter": "photo-1590767425054-ecc74aa82b82",
+  "Paddleboard Day": "photo-1472745942893-4b9f730c7668",
+  "Snowboard Day": "photo-1478700485868-972b69dc3fc4",
+  "Kayak Day Trip": "photo-1588472235276-7638965471e2",
+  "Weekend Camping for Two": "photo-1633431305692-00a2f1a5c3d5",
+  "Ski Day": "photo-1551698618-1dfe5d97d256",
+  "Backpacking Overnight": "photo-1708647507980-058ff659a497",
+  "Sport Climbing Kit": "photo-1631045487342-a6143f645e2d",
+  "Mountaineering Intro": "photo-1790693209032-645727eeff77",
+  "Mountain Bike Day": "photo-1633707167682-9068729bc84c",
+  "Gravel Bike Tour": "photo-1785711930095-7a6fb14b2492",
+  "Canoe Weekend": "photo-1468221296755-1c53a9dbcd54",
+  "Winter Camping for Two": "photo-1455496231601-e6195da1f841",
+  "Family Car Camping": "photo-1504280390367-361c6d9f38f4"
+};
+
+/* Picture for a bundle: a product's own image if one has a link, then the bundle's photo, then the
+   drawn scene. large = the bundle page's wide banner (16:8); otherwise a card picture (16:9).
+   If a photo fails to load, it's removed and the card's plain colour shows instead of a broken icon. */
+function bundleImage(b, seed, large = false) {
+  const own = (b.products || []).map(p => p.imageUrl).find(u => u && /^https?:\/\//.test(u));
+  const id = BUNDLE_PHOTOS[b.name];
+  const src = own || (id && `https://images.unsplash.com/${id}?w=${large ? 1200 : 640}&h=${large ? 600 : 360}&fit=crop&auto=format&q=70`);
+  return src ? `<img src="${esc(src)}" alt="" ${large ? "" : `loading="lazy"`} onerror="this.remove()" style="width:100%;height:100%;object-fit:cover;display:block">`
+    : bundleArt(b, seed);
 }

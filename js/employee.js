@@ -6,6 +6,7 @@ let me = Session.get(APP);
 
 function route() {
   const h = location.hash.slice(1) || "desk";
+  scrollTo(0, 0);  // each tab starts at the top
   renderHeader("Employee", me ? [["desk", "Rental desk"], ["messages", "Messages"], ["sets", "Add sets"]] : [], h, me,
     () => { Session.clear(APP); me = null; route(); });
   if (!me) return viewLogin();
