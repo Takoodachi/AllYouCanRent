@@ -100,6 +100,21 @@ dialog.modal .auth{margin:0}
 .tabs-inline button.on{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
 
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
+/* Shop ads: a column on each side, only when there is room for them */
+.ad-rail{display:none}
+@media (min-width:1200px){
+  .shop{display:grid;grid-template-columns:190px minmax(0,1120px) 190px;justify-content:center;gap:20px;padding-inline:16px}
+  .shop main .wrap{padding-inline:0}
+  .ad-rail{display:flex;flex-direction:column;gap:16px;position:sticky;top:76px;align-self:start;padding-top:24px}
+}
+.ad{display:flex;flex-direction:column;border-radius:var(--r);overflow:hidden;text-decoration:none;color:var(--fg);background:var(--surface);box-shadow:var(--shadow);border:2px solid var(--orange)}
+.ad:hover{transform:translateY(-2px)}
+.ad .art{aspect-ratio:16/10}
+.ad .art svg{display:block;width:100%;height:100%}
+.ad .body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px}
+.ad h3{font-size:1rem;line-height:1.2}
+.ad .badge{align-self:flex-start;background:var(--orange);color:var(--on-accent);font-size:.68rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px}
+.ad-label{font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .bcard{display:flex;flex-direction:column;text-decoration:none;color:inherit;overflow:hidden;cursor:pointer;border:0;padding:0;text-align:left}
 .bcard:hover{transform:translateY(-2px)}
 .bcard{position:relative}

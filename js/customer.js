@@ -87,6 +87,8 @@ async function viewBrowse() {
   $("#app").innerHTML = `<div class="stack" style="margin-bottom:20px">
       <p class="eyebrow">${me ? `Hi ${esc(me.userName)}` : "Outdoor gear rental"}</p>
       <h1>Browse bundles</h1>
+      <input class="in" type="search" id="search" value="${esc(state.q || "")}" aria-label="Search bundles"
+        placeholder="Search bundles, gear or activities">
       <div class="row" id="tags"><span class="muted small">Loading tags…</span></div>
     </div>
     <div id="list"><p class="muted">Loading bundles…</p></div>`;
@@ -101,15 +103,19 @@ async function viewBrowse() {
     if (!list || !list.length) { $("#list").innerHTML = `<div class="card empty">No bundles${state.tag ? " with #" + esc(state.tag) : ""} yet.</div>`; return; }
     // The list only has ids and names, so load each bundle's details for the cards.
     const full = await Promise.all(list.map(b => API.getBundle(b.bundleId).catch(() => b)));
-    $("#list").innerHTML = `<div class="cards">${full.map(b => {
-      const n = (b.reviews || []).length, avg = n ? (b.reviews.reduce((s, r) => s + (+r.rating || 0), 0) / n).toFixed(1) : null;
-      return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div><div class="body">
-        <h3><a href="#bundle-${encodeURIComponent(b.bundleId)}">${esc(b.name)}</a></h3>
-        <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
-        <p class="small muted">${seeMore(itemSummary(b))}</p>
-        <div class="row between" style="margin-top:auto">${b.dailyCharge != null ? `<span><span class="price">${money(b.dailyCharge)}</span><span class="small muted"> / day</span></span>` : "<span></span>"}
-        <span class="small">${avg ? `<span class="stars">★</span> ${avg} <span class="muted">(${n})</span>` : `<span class="muted">No reviews yet</span>`}</span></div></div></div>`;
-    }).join("")}</div>`;
+    // Search runs on the loaded bundles: every word must appear in the name, a tag or an item.
+    const draw = () => {
+      state.q = $("#search").value;
+      const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+      const shown = full.filter(b => {
+        const text = [b.name, ...(b.tags || []), ...(b.products || []).map(p => p.name)].join(" ").toLowerCase();
+        return words.every(w => text.includes(w));
+      });
+      $("#list").innerHTML = shown.length ? `<div class="cards">${shown.map(bundleCard).join("")}</div>`
+        : `<div class="card empty">No bundles match “${esc(state.q)}”${state.tag ? " in #" + esc(state.tag) : ""}.</div>`;
+    };
+    $("#search").oninput = draw;
+    draw();
     $("#list").onclick = e => {
       const btn = e.target.closest("[data-more]"); if (!btn) return;
       const open = btn.textContent === "See more";
@@ -117,6 +123,43 @@ async function viewBrowse() {
       btn.textContent = open ? "See less" : "See more";
     };
   } catch (e) { $("#list").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+function bundleCard(b) {
+  const n = (b.reviews || []).length, avg = n ? (b.reviews.reduce((s, r) => s + (+r.rating || 0), 0) / n).toFixed(1) : null;
+  return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div><div class="body">
+    <h3><a href="#bundle-${encodeURIComponent(b.bundleId)}">${esc(b.name)}</a></h3>
+    <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
+    <p class="small muted">${seeMore(itemSummary(b))}</p>
+    <div class="row between" style="margin-top:auto">${b.dailyCharge != null ? `<span><span class="price">${money(b.dailyCharge)}</span><span class="small muted"> / day</span></span>` : "<span></span>"}
+    <span class="small">${avg ? `<span class="stars">★</span> ${avg} <span class="muted">(${n})</span>` : `<span class="muted">No reviews yet</span>`}</span></div></div></div>`;
+}
+
+/* ---------- side ads for popular bundles (shown on wide screens) ---------- */
+const ADS = [
+  { name: "Weekend Camping for Two", badge: "Most rented", line: "Tent, sleeping bags and a stove. Just bring the marshmallows." },
+  { name: "Kayak Day Trip", badge: "Summer favorite", line: "On the water by lunch: kayak, paddle, life jacket and dry bag." },
+  { name: "Ski Day", badge: "Skip the rental line", line: "Skis, boots, poles and a helmet, ready the night before." },
+  { name: "Family Car Camping", badge: "Families love it", line: "A 6-person tent, beds for four and chairs around the fire." }
+];
+async function renderAds() {
+  const left = $("#ads-left"), right = $("#ads-right");
+  if (!left || !right) return;
+  try {
+    const list = await API.listBundles();
+    const ads = (await Promise.all(ADS.map(async a => {
+      const b = list.find(x => x.name === a.name);
+      return b ? { ...a, ...(await API.getBundle(b.bundleId)) } : null;
+    }))).filter(Boolean);
+    const ad = a => `<a class="ad" href="#bundle-${encodeURIComponent(a.bundleId)}">
+      <div class="art">${bundleImage(a, a.bundleId)}</div>
+      <div class="body"><span class="ad-label">Ad</span><span class="badge">${esc(a.badge)}</span>
+        <h3>${esc(a.name)}</h3><p class="small muted">${esc(a.line)}</p>
+        <span><span class="price">${money(a.dailyCharge)}</span><span class="small muted"> / day</span></span>
+        <span class="btn btn-orange btn-sm">Rent it</span></div></a>`;
+    left.innerHTML = ads.slice(0, 2).map(ad).join("");
+    right.innerHTML = ads.slice(2, 4).map(ad).join("");
+  } catch (e) { /* ads are extra; the shop works without them */ }
 }
 
 /* "2× Sleeping bag · Tent", counting repeated items once. */
@@ -275,3 +318,4 @@ async function loadInbox() {
 
 window.addEventListener("hashchange", route);
 route();
+renderAds();
