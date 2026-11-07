@@ -51,11 +51,11 @@ function onSubmit(form, fn) {
 
 const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 27 L13 9 L18 17 L21 12 L29 27 Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="24" cy="7" r="2.6" fill="currentColor"/></svg>`;
 
-/* Header with app name, nav links and log out. links = [[hash, label]] */
+/* Header with app name, nav links and log out. links = [[hash, label]], shown as given. */
 function renderHeader(appLabel, links, current, user, onLogout) {
   $("#header").innerHTML = `<div class="wrap">
     <a class="logo" href="index.html">${LOGO} All you can rent</a><span class="role-tag">${esc(appLabel)}</span>
-    <nav class="main">${user ? links.map(([h, l]) => `<a href="#${h}" class="${current === h ? "on" : ""}">${esc(l)}</a>`).join("") : ""}
+    <nav class="main">${links.map(([h, l]) => `<a href="#${h}" class="${current === h ? "on" : ""}">${esc(l)}</a>`).join("")}
       ${user ? `<button type="button" id="logout">Log out ${esc(user.userName || "")}</button>` : ""}</nav></div>`;
   const lo = $("#logout"); if (lo) lo.onclick = onLogout;
 }
