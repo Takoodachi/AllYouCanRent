@@ -3,7 +3,7 @@
 
 const APP = "customer";
 let me = Session.get(APP);
-let state = { tag: "", kit: {} };  // kit: item name → how many, kept while the customer moves around
+let state = { tag: "", kit: store.get("kit", {}) };  // kit: item name → how many, kept in this browser until sent
 
 function drawHeader(h) {
   const links = me ? [["browse", "Browse bundles"], ["kit", "Build a kit"], ["reservations", "My reservations"], ["messages", "Messages"]]
@@ -15,8 +15,16 @@ function drawHeader(h) {
     $("#header nav.main").insertBefore(b, $("#theme-btn"));  // keep the theme switch last
   }
 }
+let page = "";  // the page on screen, to tell moving to a new page from redrawing this one
 function route() {
   const h = location.hash.slice(1) || "browse";
+  if (h !== page) {  // a new page starts at the top; the bundle list goes back to where you left it
+    if (page === "browse") state.browseY = scrollY;
+    state.backToList = h === "browse";
+    if (h !== "browse") scrollTo(0, 0);
+    page = h;
+  }
+  setTitle({ browse: "Browse bundles", kit: "Build a kit", reservations: "My reservations", messages: "Messages" }[h]);
   drawHeader(h);
   if (h.startsWith("bundle-")) return viewBundle(decodeURIComponent(h.slice(7)));
   if (h === "kit") return viewKit();
@@ -42,12 +50,17 @@ function authDialog() {
   if (!dlg) {
     dlg = document.createElement("dialog");
     dlg.id = "auth-dialog"; dlg.className = "modal"; dlg.setAttribute("aria-label", "Log in");
-    // Runs on every close (after logging in, the X button, or Esc): carry on, or back out.
+    // Runs on every close (after logging in, the X button, Esc, or a click outside): carry on, or back out.
     dlg.addEventListener("close", () => {
       const p = pending; pending = null;
       const next = p && (me ? p.done : p.cancel);
       if (next) next();
     });
+    // A click on the dark area around the box closes it. The press must start there too, so
+    // selecting text in a field and letting go outside the box doesn't close it.
+    let pressedOutside = false;
+    dlg.addEventListener("pointerdown", e => { pressedOutside = e.target === dlg; });
+    dlg.addEventListener("click", e => { if (pressedOutside && e.target === dlg) dlg.close(); });
     document.body.appendChild(dlg);
   }
   return dlg;
@@ -63,6 +76,7 @@ function showLogin() {
     `<p class="small muted">New to All you can rent? <button type="button" class="more" id="to-signup">Create an account</button></p>`);
   wireLogin(["customer"], APP, u => loggedIn(u, "Welcome, " + u.userName));
   $("#to-signup").onclick = showSignup;
+  $("#login-user").focus();  // when switching back from sign-up; on opening, autofocus does it
 }
 function showSignup() {
   authDialog().innerHTML = CLOSE_X + `<div class="auth card pad stack">
@@ -71,7 +85,7 @@ function showSignup() {
       <label class="f">User name<input class="in" name="userName" id="su-user" required autocomplete="username"></label>
       <label class="f">Full name<input class="in" name="realName" id="su-name" required autocomplete="name"></label>
       <label class="f">Phone number<input class="in" name="phoneNumber" id="su-phone" type="tel" required autocomplete="tel" placeholder="920-555-0123"></label>
-      <label class="f">Password<input class="in" name="password" id="su-pass" type="password" minlength="6" required autocomplete="new-password"></label>
+      <label class="f">Password${passwordInput(`name="password" id="su-pass" minlength="6" required autocomplete="new-password"`)}</label>
       <div data-msg hidden></div>
       <button class="btn btn-green btn-block" type="submit">Sign up</button>
     </form>
@@ -146,6 +160,7 @@ async function viewBrowse() {
       btn.textContent = open ? "See less" : "See more";
     };
     draw();
+    if (state.backToList) { state.backToList = false; scrollTo(0, state.browseY || 0); }
   } catch (e) { $("#list").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
 
@@ -231,8 +246,10 @@ async function viewKit() {
   $("#kit-items").oninput = e => {
     const i = e.target.closest("[data-item]"); if (!i) return;
     state.kit[i.dataset.item] = Math.max(0, Math.min(10, parseInt(i.value, 10) || 0));
+    store.set("kit", state.kit);
     drawSummary();
   };
+  linkDates($("#kit-form").startDate, $("#kit-form").endDate);
   $("#kit-form").onchange = e => { if (e.target.type === "date") drawSummary(); };
   onSubmit($("#kit-form"), async d => {
     const items = picked().map(([name, qty]) => ({ name, qty }));
@@ -244,7 +261,7 @@ async function viewKit() {
       try { await API.messageStore(me.userId, text); }
       catch (e) { throw new Error(i ? "Only part of your request was sent. Please send it again." : e.message); }
     }
-    state.kit = {}; drawList();
+    state.kit = {}; store.set("kit", {}); drawList();
     $("#kit-form").innerHTML = `<p class="eyebrow">Request sent</p><h2>We're putting your kit together</h2>
       <p>The store will message you a link to reserve it for ${esc(d.startDate)} to ${esc(d.endDate)}.</p>
       <div><a class="btn btn-ghost" href="#messages">Go to Messages</a></div>`;
@@ -257,6 +274,7 @@ async function viewBundle(id) {
   $("#app").innerHTML = `<p class="muted">Loading bundle…</p>`;
   let b;
   try { b = await API.getBundle(id); } catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+  setTitle(b.name);
   const items = b.products || [], reviews = b.reviews || [];
   const avg = reviews.length ? (reviews.reduce((s, r) => s + (+r.rating || 0), 0) / reviews.length).toFixed(1) : null;
   const start = addDays(today(), 7), end = addDays(today(), 9);
@@ -264,7 +282,7 @@ async function viewBundle(id) {
   $("#app").innerHTML = `<a href="#browse" class="small">← Back to bundles</a>
   <div class="side-col" style="margin-top:12px">
     <div class="stack">
-      <div class="art-lg">${bundleImage(b, b.bundleId)}</div>
+      <div class="art-lg">${bundleImage(b, b.bundleId, true)}</div>
       <div class="card pad stack">
         <h1>${esc(b.name)}</h1>
         <div class="row between">${b.dailyCharge != null ? `<span><span class="price" style="font-size:1.5rem">${money(b.dailyCharge)}</span> <span class="muted">/ day</span></span>` : ""}
@@ -304,6 +322,7 @@ async function viewBundle(id) {
     </div>
   </div>`;
 
+  linkDates($("#av-start"), $("#av-end"));
   if ($("#review-login")) $("#review-login").onclick = () => needLogin(() => viewBundle(id));
   onSubmit($("#review-form"), async d => {
     try {
@@ -341,7 +360,10 @@ async function viewBundle(id) {
           <p class="eyebrow">Reserved</p><h2>Reservation ${esc(r.id)}</h2>
           <p>${esc(b.name)}, ${esc(setName(btn.dataset.set))}<br>${esc(d.startDate)} to ${esc(d.endDate)}</p>
           <p class="small muted">Show this reservation number at the store to pick up your gear.</p>
-          <a class="btn btn-ghost" href="#reservations">View my reservations</a></div>`;
+          <div class="row"><button type="button" class="btn btn-quiet" id="copy-res">Copy number</button>
+            <a class="btn btn-ghost" href="#reservations">View my reservations</a></div></div>`;
+        $("#copy-res").onclick = () => navigator.clipboard.writeText(String(r.id))
+          .then(() => toast("Reservation number copied"), () => toast("Couldn't copy. Select the number instead."));
       } catch (err) { say($("#res-msg"), "err", err.message); btn.disabled = false; }
     };
   });

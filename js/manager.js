@@ -5,6 +5,7 @@ let me = Session.get(APP);
 
 function route() {
   const h = location.hash.slice(1) || "products";
+  scrollTo(0, 0);  // each tab starts at the top
   renderHeader("Manager", me ? [["products", "Products"], ["bundles", "Bundles"], ["sets", "Sets"], ["requests", "Kit requests"], ["staff", "Staff accounts"]] : [], h, me,
     () => { Session.clear(APP); me = null; location.hash = ""; route(); });
   if (!me) return h === "new-manager" ? viewNewManager() : viewLogin();
@@ -25,13 +26,13 @@ const userFields = p => `
   <label class="f">User name<input class="in" name="userName" id="${p}-user" required autocomplete="off"></label>
   <label class="f">Full name<input class="in" name="realName" id="${p}-name" required autocomplete="off"></label>
   <label class="f">Phone number<input class="in" name="phoneNumber" id="${p}-phone" type="tel" required autocomplete="off"></label>
-  <label class="f">Password<input class="in" name="password" id="${p}-pass" type="password" minlength="6" required autocomplete="new-password"></label>`;
+  <label class="f">Password${passwordInput(`name="password" id="${p}-pass" minlength="6" required autocomplete="new-password"`)}</label>`;
 function newManagerForm(standalone) {
   return `<form class="card pad stack" id="mgr-form">
     <h2>${standalone ? "Create a manager account" : "New manager"}</h2>
     <p class="small muted">Managers have full access. Creating one needs the store's master password.</p>
     ${userFields("nm")}
-    <label class="f">Master password<input class="in" name="masterPassword" id="nm-master" type="password" required autocomplete="off"></label>
+    <label class="f">Master password${passwordInput(`name="masterPassword" id="nm-master" required autocomplete="off"`)}</label>
     <div data-msg hidden></div>
     <button class="btn btn-green" type="submit">Create manager</button>
     ${standalone ? `<p class="small muted"><a href="#">Back to log in</a></p>` : ""}
@@ -83,15 +84,20 @@ async function viewProducts() {
         <label class="f">Cost when new ($)<input class="in" name="costWhenNew" id="p-value" type="number" min="0" step="0.01" required></label>
         <label class="f">Lifetime (days)<span class="hint">Also sets the price: per day = cost ÷ lifetime</span><input class="in" name="lifetimeInDays" id="p-life" type="number" min="1" step="1" required></label>
       </div>
+      <div class="row between"><span class="small muted">Customers will pay</span><span class="price" id="p-rate">–</span></div>
       <div data-msg hidden></div>
       <button class="btn btn-green" type="submit">Add product</button>
     </form>
   </div>`;
+  // Live preview of the daily price the server will set from cost and lifetime.
+  const rate = () => { const c = +$("#p-value").value, l = parseInt($("#p-life").value, 10);
+    $("#p-rate").textContent = c > 0 && l > 0 ? `${money(c / l)} / day` : "–"; };
+  $("#prod-form").oninput = rate;
   onSubmit($("#prod-form"), async (d, f) => {
     const p = { name: d.name.trim(), description: d.description.trim(), imageUrl: d.imageUrl.trim(), costWhenNew: +d.costWhenNew, lifetimeInDays: parseInt(d.lifetimeInDays, 10) };
     const r = await API.createProduct(me.userId, p);
     store.set("products", [...store.get("products", []), { productId: String(r.id), ...p }]);
-    f.reset(); loadProducts(); return `Added ${p.name} (product ${r.id}).`;
+    f.reset(); rate(); loadProducts(); return `Added ${p.name} (product ${r.id}).`;
   });
   loadProducts();
 }

@@ -35,6 +35,23 @@ NOTES
   - The sun/moon button in every header switches light and dark mode. The choice is saved in the
     browser (localStorage "rental:theme"); without one, the site follows the device setting.
 
+PHOTOS
+Bundle photos come from Unsplash (unsplash.com) and are free to use under the Unsplash License.
+They load straight from images.unsplash.com; the list is BUNDLE_PHOTOS in js/common.js.
+Thanks to the photographers:
+  Day Hike Starter - Christian Meyer-Hentschel     Bird Watching Walk - Annie Spratt
+  Snowshoe Trek - Dominik Neuner                  Bouldering Starter - Brook Anderson
+  Hammock Camping - Ris & Ry                      Beach Day - Ivett M
+  Cross-Country Ski Day - Pierre Jarry            Stargazing Night - Patrick Hendry
+  Lake Fishing Day - James Wheeler                Surf Starter - Ale Romo
+  Paddleboard Day - Ben White                     Snowboard Day - Mattias Olsson
+  Kayak Day Trip - Christian Bowen                Weekend Camping for Two - Zest Tea
+  Ski Day - Maarten Duineveld                     Backpacking Overnight - Alex Moliski
+  Sport Climbing Kit - Devon Dennis               Mountaineering Intro - Mael Balland
+  Mountain Bike Day - Axel Brunst                 Gravel Bike Tour - Patrick Hendry
+  Canoe Weekend - Michael Niessl                  Winter Camping for Two - David Schultz
+  Family Car Camping - Scott Goodwill
+
 FILES
   css/style.css   shared look
   js/api.js       every endpoint, in one place
