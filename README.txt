@@ -28,6 +28,11 @@ NOTES
     date (every set is free then). Employee, manager and customer accounts can't be counted.
   - Reviews are refused (HTTP 403) until the customer has rented and returned that bundle.
   - Message dates (dateSent) must be yyyy-mm-dd, and the server rejects messages over 255 characters.
+  - Reservation codes: people see an 8-character code (like B6C6-C579) instead of the 36-character
+    reservation number. On reserving, the shop sends the store a short note linking the two; the
+    employee desk uses those notes to open a reservation by code (ResNote in js/common.js). The
+    notes are hidden from the staff Messages page. Older reservations get their note the next time
+    the customer opens My reservations.
   - Custom kits: customers can't create bundles or sets, so "Build a kit" in the shop sends the
     request as message(s) to the store (format in KitRequest, js/common.js; big kits are split into
     parts). Manager > Kit requests builds it with one click: a bundle tagged "custom" (hidden from

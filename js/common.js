@@ -162,6 +162,26 @@ const MSG_MAX = 255;
      Dates: 2026-11-20 to 2026-11-22
      - 2 × Mummy sleeping bag (20°F)
      Note: ...                                                     */
+/* Short reservation codes. The server's reservation number is a 36-character id and it has no way
+   to search, so people see the first 8 characters instead, like "B6C6-C579". When a customer
+   reserves, the shop sends the store a note linking the code to the full number; the employee
+   desk reads those notes to turn a typed code back into the full number.
+   shortcut: 8 characters, so two reservations could share a code (very unlikely for one store);
+   the notes are never deleted. Upgrade if the server gets short ids or a reservation search. */
+const resCode = id => { const c = String(id).replace(/-/g, "").slice(0, 8).toUpperCase(); return `${c.slice(0, 4)}-${c.slice(4)}`; };
+const ResNote = {
+  text: (id, about) => `Reservation code ${resCode(id)}\nFull number: ${id}\n${about}`.slice(0, MSG_MAX),
+  // → the full reservation id in a note, or null if the message isn't one
+  parse: text => (String(text || "").match(/^Reservation code \S+\nFull number: ([0-9a-f-]{36})/i) || [])[1] || null,
+  // A typed code (any case, with or without the dash) or a full number → the full id, using the store's notes
+  resolve(typed, notes) {
+    const v = String(typed).trim().toLowerCase().replace(/[\s-]/g, "");
+    if (/^[0-9a-f]{32}$/.test(v)) return String(typed).trim();
+    if (!/^[0-9a-f]{8}$/.test(v)) return null;
+    return notes.map(m => ResNote.parse(m.content)).find(id => id && id.replace(/-/g, "").toLowerCase().startsWith(v)) || null;
+  }
+};
+
 const KIT_HEAD = "Custom kit request";
 const KitRequest = {
   // → the message texts to send, each within MSG_MAX

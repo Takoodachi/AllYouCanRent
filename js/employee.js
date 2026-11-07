@@ -31,8 +31,9 @@ async function viewDesk() {
     <div class="side-col">
       <div class="card pad stack">
         <form class="stack" id="lookup">
-          <label class="f">Reservation number<span class="hint">The number the customer shows you</span>
-            <input class="in" name="rid" id="lookup-id" required autocomplete="off"></label>
+          <label class="f">Reservation code<span class="hint">The code the customer shows you, like B6C6-C579. The full number works too.</span>
+            <input class="in code" name="rid" id="lookup-id" required autocomplete="off" placeholder="B6C6-C579"></label>
+          <div data-msg hidden></div>
           <button class="btn btn-green btn-sm" type="submit">Open reservation</button>
         </form>
         <div class="row between"><h2>Reservations</h2><button type="button" class="btn btn-quiet btn-sm" id="refresh">Refresh</button></div>
@@ -43,7 +44,12 @@ async function viewDesk() {
     </div>`;
   $("#refresh").onclick = loadReservations;
   $("#rfilter").oninput = drawList;
-  $("#lookup").onsubmit = e => { e.preventDefault(); openReservation($("#lookup-id").value.trim()); };
+  // A short code is turned back into the full number using the notes the shop sends the store.
+  onSubmit($("#lookup"), async d => {
+    const id = ResNote.resolve(d.rid, await API.storeInbox(me.userId) || []);
+    if (!id) throw new Error(`No reservation found for "${d.rid.trim()}". Check the code with the customer.`);
+    openReservation(id);
+  });
   await loadReservations();
 }
 async function loadReservations() {
@@ -52,12 +58,12 @@ async function loadReservations() {
 }
 function drawList() {
   const f = ($("#rfilter")?.value || "").toLowerCase();
-  const list = reservations.filter(r => !f || [r.reservationId, r.userName, r.bundleName].join(" ").toLowerCase().includes(f));
-  $("#rlist").innerHTML = list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>No.</th><th>Customer</th><th>Bundle</th><th>Dates</th><th>Status</th></tr></thead><tbody>
+  const list = reservations.filter(r => !f || [resCode(r.reservationId), r.reservationId, r.userName, r.bundleName].join(" ").toLowerCase().includes(f));
+  $("#rlist").innerHTML = list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Customer</th><th>Bundle</th><th>Dates</th><th>Status</th></tr></thead><tbody>
     ${list.map(r => `<tr data-rid="${esc(r.reservationId)}" style="cursor:pointer;${current && current.reservationId === r.reservationId ? "background:var(--green-soft)" : ""}">
-      <td><b>${esc(r.reservationId)}</b></td><td>${esc(r.userName)}</td><td>${esc(r.bundleName)}</td><td class="small">${esc(r.startDate)} → ${esc(r.endDate)}</td>
+      <td><b class="code">${esc(resCode(r.reservationId))}</b></td><td>${esc(r.userName)}</td><td>${esc(r.bundleName)}</td><td class="small">${esc(r.startDate)} → ${esc(r.endDate)}</td>
       <td><span class="pill ${PILL(r.status)}">${esc(r.status)}</span></td></tr>`).join("")}</tbody></table></div>`
-    : `<p class="empty">${reservations.length ? "No reservations match." : "None listed. The server only lists a user's own reservations, so open a customer's by number above."}</p>`;
+    : `<p class="empty">${reservations.length ? "No reservations match." : "None listed. The server only lists a user's own reservations, so open a customer's by code above."}</p>`;
   $("#rlist").onclick = e => { const tr = e.target.closest("[data-rid]"); if (tr) openReservation(tr.dataset.rid); };
 }
 
@@ -92,8 +98,9 @@ async function openReservation(id) {
 
   $("#desk").innerHTML = `<div class="stack">
     <div class="card pad stack">
-      <div class="row between"><h2>Reservation ${esc(r.reservationId)}</h2>${r.status ? `<span class="pill ${PILL(r.status)}">${esc(r.status)}</span>` : ""}</div>
-      ${r.noDetails ? `<p class="small muted">Couldn't load details for this number. Check it matches the customer's reservation.</p>` : ""}
+      <div class="row between"><h2>Reservation <span class="code">${esc(resCode(r.reservationId))}</span></h2>${r.status ? `<span class="pill ${PILL(r.status)}">${esc(r.status)}</span>` : ""}</div>
+      <p class="small muted">Full number: ${esc(r.reservationId)}</p>
+      ${r.noDetails ? `<p class="small muted">Couldn't load details for this reservation. Check it matches the customer's.</p>` : ""}
       <div class="grid-2 small">
         <div><span class="muted">Customer</span><br><b>${esc(r.userName || "")}</b></div>
         <div><span class="muted">Bundle</span><br><b>${esc(r.bundleName || "")}</b>${r.setId ? `, ${esc(setName(r.setId))} <span class="muted">(${esc(r.setId)})</span>` : ""}</div>
@@ -172,7 +179,8 @@ async function viewMessages() {
   onSubmit($("#send-form"), async (d, f) => { await API.messageCustomer(me.userId, d.to.trim(), d.content.trim()); f.reset(); return "Sent."; });
   const box = $("#inbox");
   try {
-    const msgs = await API.storeInbox(me.userId);
+    // Reservation code notes are for the desk's lookup, not for reading, so they're left out here.
+    const msgs = (await API.storeInbox(me.userId) || []).filter(m => !ResNote.parse(m.content));
     box.innerHTML = msgs && msgs.length ? msgs.map(m => `<div class="inbox-item">
       <div class="row between"><b>${esc(m.senderName || m.userName || "Customer")}</b><span class="small muted">${esc(m.dateSent || "")}</span></div>
       <p>${esc(m.content)}</p>
