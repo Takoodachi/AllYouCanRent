@@ -3,25 +3,32 @@
 const APP = "customer";
 let me = Session.get(APP);
 let state = { tag: "" };
+let returnTo = "browse";  // page to go back to after logging in
 
 function route() {
   const h = location.hash.slice(1) || "browse";
-  const links = [["browse", "Browse bundles"], ["reservations", "My reservations"], ["messages", "Messages"]];
-  renderHeader("Customer", links, h.split("-")[0], me, () => { Session.clear(APP); me = null; location.hash = "login"; route(); });
+  if (!me && h !== "login" && h !== "signup") returnTo = h;
+  const links = me ? [["browse", "Browse bundles"], ["reservations", "My reservations"], ["messages", "Messages"]]
+    : [["browse", "Browse bundles"], ["login", "Log in"]];
+  renderHeader("Customer", links, h.split("-")[0], me, () => { Session.clear(APP); me = null; location.hash = "browse"; route(); });
 
-  if (!me && h !== "signup") return viewLogin();
+  // Anyone can browse. Reserving, reviewing, reservations and messages need an account.
   if (h === "signup") return viewSignup();
   if (h.startsWith("bundle-")) return viewBundle(decodeURIComponent(h.slice(7)));
+  if (!me && (h === "login" || h === "reservations" || h === "messages")) return viewLogin();
   if (h === "reservations") return viewReservations();
   if (h === "messages") return viewMessages();
   return viewBrowse();
+}
+function backToPage() {
+  if (location.hash.slice(1) === returnTo) route(); else location.hash = returnTo;
 }
 
 /* ---------- account ---------- */
 function viewLogin() {
   $("#app").innerHTML = loginView("Log in to rent gear",
-    `<p class="small muted">New to All you can rent? <a href="#signup">Create an account</a></p>`);
-  wireLogin(["customer"], APP, u => { me = u; toast("Welcome, " + u.userName); location.hash = "browse"; route(); });
+    `<p class="small muted">New to All you can rent? <a href="#signup">Create an account</a> · <a href="#browse">Keep browsing</a></p>`);
+  wireLogin(["customer"], APP, u => { me = u; toast("Welcome, " + u.userName); backToPage(); });
 }
 function viewSignup() {
   $("#app").innerHTML = `<div class="auth card pad stack">
@@ -38,14 +45,14 @@ function viewSignup() {
   onSubmit($("#signup-form"), async d => {
     const res = await API.createCustomer(d);
     me = { userId: String(res.id), userName: d.userName, role: "customer" };
-    Session.set(APP, me); toast("Account created"); location.hash = "browse"; route();
+    Session.set(APP, me); toast("Account created"); backToPage();
   });
 }
 
 /* ---------- browse ---------- */
 async function viewBrowse() {
   $("#app").innerHTML = `<div class="stack" style="margin-bottom:20px">
-      <p class="eyebrow">Hi ${esc(me.userName)}</p>
+      <p class="eyebrow">${me ? `Hi ${esc(me.userName)}` : "Outdoor gear rental"}</p>
       <h1>Browse bundles</h1>
       <div class="row" id="tags"><span class="muted small">Loading tags…</span></div>
     </div>
@@ -99,7 +106,8 @@ async function viewBundle(id) {
   try { b = await API.getBundle(id); } catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
   const items = b.products || [], reviews = b.reviews || [];
   const avg = reviews.length ? (reviews.reduce((s, r) => s + (+r.rating || 0), 0) / reviews.length).toFixed(1) : null;
-  const start = addDays(today(), 7), end = addDays(today(), 9);
+  // Dates a guest picked before logging in, so they don't have to pick them again.
+  const start = state.start || addDays(today(), 7), end = state.end || addDays(today(), 9);
 
   $("#app").innerHTML = `<a href="#browse" class="small">← Back to bundles</a>
   <div class="side-col" style="margin-top:12px">
@@ -120,14 +128,14 @@ async function viewBundle(id) {
         ${reviews.length ? reviews.map(r => `<div class="inbox-item"><div class="row between"><b>${esc(r.userName || "Customer")}</b>
           <span class="stars">${"★".repeat(+r.rating || 0)}<span class="muted">${"★".repeat(Math.max(0, 5 - (+r.rating || 0)))}</span></span></div>
           <p>${esc(r.content || "")}</p>${r.dateEntered ? `<span class="small muted">${esc(r.dateEntered)}</span>` : ""}</div>`).join("") : `<p class="muted small">Be the first to review this bundle after your trip.</p>`}
-        <form class="stack" id="review-form" style="border-top:1px solid var(--line);padding-top:14px">
+        ${me ? `<form class="stack" id="review-form" style="border-top:1px solid var(--line);padding-top:14px">
           <h3>Write a review</h3>
           <p class="small muted">You can review a bundle after you've rented and returned it.</p>
           <label class="f">Rating<select class="in" name="rating" id="rv-rating">${[5, 4, 3, 2, 1].map(n => `<option value="${n}">${n} star${n > 1 ? "s" : ""}</option>`).join("")}</select></label>
           <label class="f">Your review<textarea class="in" name="content" id="rv-text" rows="3" required placeholder="How was the gear? Any tips for the next renter?"></textarea></label>
           <div data-msg hidden></div>
           <button class="btn btn-ghost" type="submit">Post review</button>
-        </form>
+        </form>` : `<p class="small muted" style="border-top:1px solid var(--line);padding-top:14px"><a href="#login">Log in</a> to review this bundle after your trip.</p>`}
       </div>
     </div>
     <div class="stack">
@@ -163,11 +171,15 @@ async function viewBundle(id) {
     box.innerHTML = `<div class="card pad stack"><h3>${sets.length} set${sets.length > 1 ? "s" : ""} available</h3>
       ${sets.map((s, i) => `<div class="row between" style="border-top:${i ? "1px solid var(--line)" : "0"};padding-top:${i ? "12px" : "0"}">
         <div><b>${esc(setName(s.setId))}</b><br><span class="small muted">${s.dailyCharge != null ? `${money(s.dailyCharge)} × ${nDays} day${nDays > 1 ? "s" : ""}` : ""}${s.cleaningFee != null ? ` + ${money(s.cleaningFee)} cleaning fee` : ""}</span></div>
-        <button type="button" class="btn btn-orange btn-sm" data-set="${esc(s.setId)}">Reserve</button></div>`).join("")}
+        <button type="button" class="btn btn-orange btn-sm" data-set="${esc(s.setId)}">${me ? "Reserve" : "Log in to reserve"}</button></div>`).join("")}
       <p class="small muted">You pay at the store when you return the set. Lost or damaged items are added to your invoice.</p>
       <div data-msg hidden id="res-msg"></div></div>`;
     box.onclick = async e => {
       const btn = e.target.closest("[data-set]"); if (!btn) return;
+      if (!me) {  // guests log in first, then come back to this bundle with the same dates
+        state.start = d.startDate; state.end = d.endDate;
+        toast("Log in or create an account to reserve"); location.hash = "login"; return;
+      }
       btn.disabled = true;
       try {
         const r = await API.reserve(me.userId, { setId: btn.dataset.set, startDate: d.startDate, endDate: d.endDate });

@@ -5,7 +5,7 @@ let me = Session.get(APP);
 
 function route() {
   const h = location.hash.slice(1) || "products";
-  renderHeader("Manager", [["products", "Products"], ["bundles", "Bundles"], ["sets", "Sets"], ["staff", "Staff accounts"]], h, me,
+  renderHeader("Manager", me ? [["products", "Products"], ["bundles", "Bundles"], ["sets", "Sets"], ["staff", "Staff accounts"]] : [], h, me,
     () => { Session.clear(APP); me = null; location.hash = ""; route(); });
   if (!me) return h === "new-manager" ? viewNewManager() : viewLogin();
   if (h === "bundles") return viewBundles();
