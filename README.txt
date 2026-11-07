@@ -1,8 +1,9 @@
 All you can rent — rental system front end (CMSC 106)
 
-Open index.html in a browser. It links to the three apps:
-  customer.html  - browse bundles by tag (no account needed); log in or sign up to reserve a set,
-                   review, see reservations and message the store
+Open index.html in a browser. It is the shop, and its footer links to the staff apps:
+  index.html     - browse bundles by tag (no account needed). A log-in pop-up opens when a customer
+                   reserves, reviews, or opens My reservations or Messages.
+                   (customer.html just redirects here, so old links still work.)
   employee.html  - check out / return sets, repair charges, lost items, invoices, messages
   manager.html   - create managers and employees, products, bundles and sets
 

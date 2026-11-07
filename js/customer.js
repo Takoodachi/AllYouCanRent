@@ -1,37 +1,69 @@
-/* customer.js — sign up, browse bundles, reserve, review, message the store */
+/* customer.js — browse bundles, reserve, review, message the store.
+   Anyone can browse. A log-in pop-up opens only for things that need an account. */
 
 const APP = "customer";
 let me = Session.get(APP);
 let state = { tag: "" };
-let returnTo = "browse";  // page to go back to after logging in
 
+function drawHeader(h) {
+  const links = me ? [["browse", "Browse bundles"], ["reservations", "My reservations"], ["messages", "Messages"]] : [["browse", "Browse bundles"]];
+  renderHeader("Customer", links, h.split("-")[0], me, () => { Session.clear(APP); me = null; go("browse"); });
+  if (!me) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = "Log in"; b.onclick = () => needLogin(route);
+    $("#header nav.main").appendChild(b);
+  }
+}
 function route() {
   const h = location.hash.slice(1) || "browse";
-  if (!me && h !== "login" && h !== "signup") returnTo = h;
-  const links = me ? [["browse", "Browse bundles"], ["reservations", "My reservations"], ["messages", "Messages"]]
-    : [["browse", "Browse bundles"], ["login", "Log in"]];
-  renderHeader("Customer", links, h.split("-")[0], me, () => { Session.clear(APP); me = null; location.hash = "browse"; route(); });
-
-  // Anyone can browse. Reserving, reviewing, reservations and messages need an account.
-  if (h === "signup") return viewSignup();
+  drawHeader(h);
   if (h.startsWith("bundle-")) return viewBundle(decodeURIComponent(h.slice(7)));
-  if (!me && (h === "login" || h === "reservations" || h === "messages")) return viewLogin();
-  if (h === "reservations") return viewReservations();
-  if (h === "messages") return viewMessages();
+  if (h === "reservations" || h === "messages") {
+    if (!me) { viewBrowse(); return needLogin(route, () => go("browse")); }
+    return h === "reservations" ? viewReservations() : viewMessages();
+  }
   return viewBrowse();
 }
-function backToPage() {
-  if (location.hash.slice(1) === returnTo) route(); else location.hash = returnTo;
+function go(h) {
+  if ((location.hash.slice(1) || "browse") === h) route(); else location.hash = h;
 }
 
-/* ---------- account ---------- */
-function viewLogin() {
-  $("#app").innerHTML = loginView("Log in to rent gear",
-    `<p class="small muted">New to All you can rent? <a href="#signup">Create an account</a> · <a href="#browse">Keep browsing</a></p>`);
-  wireLogin(["customer"], APP, u => { me = u; toast("Welcome, " + u.userName); backToPage(); });
+/* ---------- log-in / sign-up pop-up ---------- */
+let pending = null;  // { done, cancel } for the action waiting on a log-in
+function needLogin(done, cancel) {
+  pending = { done, cancel };
+  showLogin();
+  if (!authDialog().open) authDialog().showModal();
 }
-function viewSignup() {
-  $("#app").innerHTML = `<div class="auth card pad stack">
+function authDialog() {
+  let dlg = $("#auth-dialog");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "auth-dialog"; dlg.className = "modal"; dlg.setAttribute("aria-label", "Log in");
+    // Runs on every close (after logging in, the X button, or Esc): carry on, or back out.
+    dlg.addEventListener("close", () => {
+      const p = pending; pending = null;
+      const next = p && (me ? p.done : p.cancel);
+      if (next) next();
+    });
+    document.body.appendChild(dlg);
+  }
+  return dlg;
+}
+const CLOSE_X = `<form method="dialog" class="modal-x"><button aria-label="Close">×</button></form>`;
+function loggedIn(u, msg) {
+  me = u; Session.set(APP, u); toast(msg);
+  drawHeader(location.hash.slice(1) || "browse");
+  authDialog().close();
+}
+function showLogin() {
+  authDialog().innerHTML = CLOSE_X + loginView("Log in to continue",
+    `<p class="small muted">New to All you can rent? <button type="button" class="more" id="to-signup">Create an account</button></p>`);
+  wireLogin(["customer"], APP, u => loggedIn(u, "Welcome, " + u.userName));
+  $("#to-signup").onclick = showSignup;
+}
+function showSignup() {
+  authDialog().innerHTML = CLOSE_X + `<div class="auth card pad stack">
     <h2>Create your account</h2>
     <form class="stack" id="signup-form">
       <label class="f">User name<input class="in" name="userName" id="su-user" required autocomplete="username"></label>
@@ -41,12 +73,13 @@ function viewSignup() {
       <div data-msg hidden></div>
       <button class="btn btn-green btn-block" type="submit">Sign up</button>
     </form>
-    <p class="small muted">Already have an account? <a href="#login">Log in</a></p></div>`;
+    <p class="small muted">Already have an account? <button type="button" class="more" id="to-login">Log in</button></p></div>`;
+  $("#to-login").onclick = showLogin;
   onSubmit($("#signup-form"), async d => {
     const res = await API.createCustomer(d);
-    me = { userId: String(res.id), userName: d.userName, role: "customer" };
-    Session.set(APP, me); toast("Account created"); backToPage();
+    loggedIn({ userId: String(res.id), userName: d.userName, role: "customer" }, "Account created");
   });
+  $("#su-user").focus();
 }
 
 /* ---------- browse ---------- */
@@ -106,8 +139,7 @@ async function viewBundle(id) {
   try { b = await API.getBundle(id); } catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
   const items = b.products || [], reviews = b.reviews || [];
   const avg = reviews.length ? (reviews.reduce((s, r) => s + (+r.rating || 0), 0) / reviews.length).toFixed(1) : null;
-  // Dates a guest picked before logging in, so they don't have to pick them again.
-  const start = state.start || addDays(today(), 7), end = state.end || addDays(today(), 9);
+  const start = addDays(today(), 7), end = addDays(today(), 9);
 
   $("#app").innerHTML = `<a href="#browse" class="small">← Back to bundles</a>
   <div class="side-col" style="margin-top:12px">
@@ -135,7 +167,7 @@ async function viewBundle(id) {
           <label class="f">Your review<textarea class="in" name="content" id="rv-text" rows="3" required placeholder="How was the gear? Any tips for the next renter?"></textarea></label>
           <div data-msg hidden></div>
           <button class="btn btn-ghost" type="submit">Post review</button>
-        </form>` : `<p class="small muted" style="border-top:1px solid var(--line);padding-top:14px"><a href="#login">Log in</a> to review this bundle after your trip.</p>`}
+        </form>` : `<p class="small muted" style="border-top:1px solid var(--line);padding-top:14px"><button type="button" class="more" id="review-login">Log in</button> to review this bundle after your trip.</p>`}
       </div>
     </div>
     <div class="stack">
@@ -152,6 +184,7 @@ async function viewBundle(id) {
     </div>
   </div>`;
 
+  if ($("#review-login")) $("#review-login").onclick = () => needLogin(() => viewBundle(id));
   onSubmit($("#review-form"), async d => {
     try {
       await API.postReview(me.userId, { bundleId: b.bundleId, rating: +d.rating, content: d.content.trim() });
@@ -174,12 +207,13 @@ async function viewBundle(id) {
         <button type="button" class="btn btn-orange btn-sm" data-set="${esc(s.setId)}">${me ? "Reserve" : "Log in to reserve"}</button></div>`).join("")}
       <p class="small muted">You pay at the store when you return the set. Lost or damaged items are added to your invoice.</p>
       <div data-msg hidden id="res-msg"></div></div>`;
-    box.onclick = async e => {
+    box.onclick = e => {
       const btn = e.target.closest("[data-set]"); if (!btn) return;
-      if (!me) {  // guests log in first, then come back to this bundle with the same dates
-        state.start = d.startDate; state.end = d.endDate;
-        toast("Log in or create an account to reserve"); location.hash = "login"; return;
-      }
+      if (me) return reserve(btn);
+      // Guests log in first, then the reservation goes ahead.
+      needLogin(() => { box.querySelectorAll("[data-set]").forEach(x => { x.textContent = "Reserve"; }); reserve(btn); });
+    };
+    const reserve = async btn => {
       btn.disabled = true;
       try {
         const r = await API.reserve(me.userId, { setId: btn.dataset.set, startDate: d.startDate, endDate: d.endDate });
