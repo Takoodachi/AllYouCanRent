@@ -4,6 +4,8 @@ Open index.html in a browser. It is the shop, and its footer links to the staff 
   index.html     - browse bundles by tag (no account needed). A log-in pop-up opens when a customer
                    reserves, reviews, or opens My reservations or Messages.
                    (customer.html just redirects here, so old links still work.)
+                   A search box filters bundles by name, tag or gear. On wide screens, side ads promote
+                   the bundles listed in ADS in js/customer.js (matched by bundle name).
   employee.html  - check out / return sets, repair charges, lost items, invoices, messages
   manager.html   - create managers and employees, products, bundles and sets
 
