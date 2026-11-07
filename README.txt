@@ -27,7 +27,11 @@ NOTES
   - The server can't list sets or users. Set counts come from /sets/available on a far-future
     date (every set is free then). Employee, manager and customer accounts can't be counted.
   - Reviews are refused (HTTP 403) until the customer has rented and returned that bundle.
-  - Message dates (dateSent) must be yyyy-mm-dd.
+  - Message dates (dateSent) must be yyyy-mm-dd, and the server rejects messages over 255 characters.
+  - Custom kits: customers can't create bundles or sets, so "Build a kit" in the shop sends the
+    request as message(s) to the store (format in KitRequest, js/common.js; big kits are split into
+    parts). Manager > Kit requests builds it with one click: a bundle tagged "custom" (hidden from
+    the shop), one set, and a message to the customer with a link to reserve it.
   - The sun/moon button in every header switches light and dark mode. The choice is saved in the
     browser (localStorage "rental:theme"); without one, the site follows the device setting.
 

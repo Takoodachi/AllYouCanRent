@@ -3,10 +3,11 @@
 
 const APP = "customer";
 let me = Session.get(APP);
-let state = { tag: "" };
+let state = { tag: "", kit: {} };  // kit: item name → how many, kept while the customer moves around
 
 function drawHeader(h) {
-  const links = me ? [["browse", "Browse bundles"], ["reservations", "My reservations"], ["messages", "Messages"]] : [["browse", "Browse bundles"]];
+  const links = me ? [["browse", "Browse bundles"], ["kit", "Build a kit"], ["reservations", "My reservations"], ["messages", "Messages"]]
+    : [["browse", "Browse bundles"], ["kit", "Build a kit"]];
   renderHeader("Customer", links, h.split("-")[0], me, () => { Session.clear(APP); me = null; go("browse"); });
   if (!me) {
     const b = document.createElement("button");
@@ -18,6 +19,7 @@ function route() {
   const h = location.hash.slice(1) || "browse";
   drawHeader(h);
   if (h.startsWith("bundle-")) return viewBundle(decodeURIComponent(h.slice(7)));
+  if (h === "kit") return viewKit();
   if (h === "reservations" || h === "messages") {
     if (!me) { viewBrowse(); return needLogin(route, () => go("browse")); }
     return h === "reservations" ? viewReservations() : viewMessages();
@@ -84,11 +86,15 @@ function showSignup() {
 
 /* ---------- browse ---------- */
 const label = t => t.charAt(0).toUpperCase() + t.slice(1);  // "cross-country ski" → "Cross-country ski"
+/* Every bundle with its details. The list call only returns ids and names. */
+const loadBundles = async () => Promise.all((await API.listBundles()).map(b => API.getBundle(b.bundleId).catch(() => b)));
+// Kits built for one customer are tagged "custom". They stay out of the shop; the customer gets a link.
+const isCustomKit = b => (b.tags || []).includes("custom");
 
 async function viewBrowse() {
   $("#app").innerHTML = `<div class="stack" style="margin-bottom:20px">
       <p class="eyebrow">${me ? `Hi ${esc(me.userName)}` : "Outdoor gear rental"}</p>
-      <h1>Browse bundles</h1>
+      <div class="row between"><h1>Browse bundles</h1><a class="btn btn-ghost btn-sm" href="#kit">Build your own kit</a></div>
       <div class="filters">
         <input class="in" type="search" id="search" value="${esc(state.q || "")}" aria-label="Search bundles"
           placeholder="Search bundles, gear or activities">
@@ -98,10 +104,8 @@ async function viewBrowse() {
     </div>
     <div id="list"><p class="muted">Loading bundles…</p></div>`;
   try {
-    const list = await API.listBundles();
-    if (!list || !list.length) { $("#list").innerHTML = `<div class="card empty">No bundles yet.</div>`; return; }
-    // The list only has ids and names, so load each bundle's details once, then filter here.
-    const full = await Promise.all(list.map(b => API.getBundle(b.bundleId).catch(() => b)));
+    const full = (await loadBundles()).filter(b => !isCustomKit(b));
+    if (!full.length) { $("#list").innerHTML = `<div class="card empty">No bundles yet.</div>`; return; }
     // Activities come from the bundles on show, so every choice has results. Most used first.
     const uses = new Map();
     full.forEach(b => (b.tags || []).forEach(t => uses.set(t, (uses.get(t) || 0) + 1)));
@@ -168,6 +172,86 @@ function seeMore(text, max = 90) {
   return `<span>${esc(at > 0 ? cut.slice(0, at) : cut.replace(/\s+\S*$/, ""))}…</span><span hidden>${esc(text)}</span> <button type="button" class="more" data-more>See more</button>`;
 }
 
+/* ---------- build your own kit ---------- */
+async function viewKit() {
+  $("#app").innerHTML = `<div class="stack" style="margin-bottom:20px">
+      <p class="eyebrow">Build your own kit</p>
+      <h1>Pick exactly the gear you need</h1>
+      <p class="muted">Choose items and dates, then send the request. The store checks the shelves, puts your kit together and messages you a link to reserve it.</p>
+    </div>
+    <div class="side-col">
+      <div class="card pad stack">
+        <input class="in" type="search" id="kit-search" aria-label="Search gear" placeholder="Search gear, like tent or helmet">
+        <div class="kit-list" id="kit-items"><p class="muted small">Loading gear…</p></div>
+      </div>
+      <form class="card pad stack" id="kit-form">
+        <h2>Your kit</h2>
+        <div id="kit-summary"></div>
+        <div class="grid-2">
+          <label class="f">Start date<input class="in" type="date" name="startDate" value="${addDays(today(), 7)}" min="${today()}" required></label>
+          <label class="f">End date<input class="in" type="date" name="endDate" value="${addDays(today(), 9)}" min="${today()}" required></label>
+        </div>
+        <label class="f">Note for the store<span class="hint">Optional, like sizes or group size</span><textarea class="in" name="note" rows="2" maxlength="150"></textarea></label>
+        <div data-msg hidden></div>
+        <button class="btn btn-green btn-block" type="submit">Send request</button>
+        <p class="small muted">A cleaning fee is added when you bring the kit back. The store replies in Messages.</p>
+      </form>
+    </div>`;
+  // The gear list is every item in the shop's bundles. The server matches kit items by name.
+  let gear;
+  try {
+    const byName = new Map();
+    (await loadBundles()).forEach(b => (b.products || []).forEach(p => { if (!byName.has(p.name)) byName.set(p.name, p); }));
+    gear = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  } catch (e) { $("#kit-items").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+  const price = new Map(gear.map(p => [p.name, +p.dailyCharge || 0]));
+  const picked = () => Object.entries(state.kit).filter(([name, n]) => n > 0 && price.has(name));
+
+  const drawList = () => {
+    const words = $("#kit-search").value.toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = gear.filter(p => words.every(w => `${p.name} ${p.description || ""}`.toLowerCase().includes(w)));
+    $("#kit-items").innerHTML = shown.length ? shown.map(p => `<label class="kit-row">
+        <span><b>${esc(p.name)}</b><br><span class="small muted">${esc(p.description || "")}</span></span>
+        <span class="small muted">${money(p.dailyCharge)}/day</span>
+        <input class="in" type="number" min="0" max="10" value="${state.kit[p.name] || 0}" data-item="${esc(p.name)}" aria-label="How many: ${esc(p.name)}"></label>`).join("")
+      : `<p class="empty">No gear matches.</p>`;
+  };
+  // Same formula the server uses (each item's cost ÷ lifetime), so this matches the bundle price it makes.
+  const drawSummary = () => {
+    const f = $("#kit-form"), list = picked();
+    const perDay = list.reduce((s, [name, n]) => s + n * price.get(name), 0);
+    const days = Math.max(1, Math.round((Date.parse(f.endDate.value) - Date.parse(f.startDate.value)) / 864e5)) || 1;
+    $("#kit-summary").innerHTML = list.length ? `<div class="lines">
+        ${list.map(([name, n]) => `<div><span>${n} × ${esc(name)}</span><span>${money(n * price.get(name))}</span></div>`).join("")}
+        <div class="total"><span>Per day</span><span class="price">${money(perDay)}</span></div>
+        <div class="small muted"><span>${days} day${days > 1 ? "s" : ""}, before the cleaning fee</span><span>${money(perDay * days)}</span></div></div>`
+      : `<p class="muted small">Nothing picked yet. Set a number next to any item.</p>`;
+  };
+  $("#kit-search").oninput = drawList;
+  $("#kit-items").oninput = e => {
+    const i = e.target.closest("[data-item]"); if (!i) return;
+    state.kit[i.dataset.item] = Math.max(0, Math.min(10, parseInt(i.value, 10) || 0));
+    drawSummary();
+  };
+  $("#kit-form").onchange = e => { if (e.target.type === "date") drawSummary(); };
+  onSubmit($("#kit-form"), async d => {
+    const items = picked().map(([name, qty]) => ({ name, qty }));
+    if (!items.length) throw new Error("Pick at least one item for your kit.");
+    if (d.endDate < d.startDate) throw new Error("The end date is before the start date.");
+    if (!me) return needLogin(() => $("#kit-form").requestSubmit());  // send right after logging in
+    const parts = KitRequest.messages({ startDate: d.startDate, endDate: d.endDate, items, note: d.note.trim() });
+    for (const [i, text] of parts.entries()) {
+      try { await API.messageStore(me.userId, text); }
+      catch (e) { throw new Error(i ? "Only part of your request was sent. Please send it again." : e.message); }
+    }
+    state.kit = {}; drawList();
+    $("#kit-form").innerHTML = `<p class="eyebrow">Request sent</p><h2>We're putting your kit together</h2>
+      <p>The store will message you a link to reserve it for ${esc(d.startDate)} to ${esc(d.endDate)}.</p>
+      <div><a class="btn btn-ghost" href="#messages">Go to Messages</a></div>`;
+  });
+  drawList(); drawSummary();
+}
+
 /* ---------- bundle details, availability, reserve, review ---------- */
 async function viewBundle(id) {
   $("#app").innerHTML = `<p class="muted">Loading bundle…</p>`;
@@ -200,7 +284,7 @@ async function viewBundle(id) {
           <h3>Write a review</h3>
           <p class="small muted">You can review a bundle after you've rented and returned it.</p>
           <label class="f">Rating<select class="in" name="rating" id="rv-rating">${[5, 4, 3, 2, 1].map(n => `<option value="${n}">${n} star${n > 1 ? "s" : ""}</option>`).join("")}</select></label>
-          <label class="f">Your review<textarea class="in" name="content" id="rv-text" rows="3" required placeholder="How was the gear? Any tips for the next renter?"></textarea></label>
+          <label class="f">Your review<textarea class="in" name="content" id="rv-text" rows="3" required maxlength="255" placeholder="How was the gear? Any tips for the next renter?"></textarea></label>
           <div data-msg hidden></div>
           <button class="btn btn-ghost" type="submit">Post review</button>
         </form>` : `<p class="small muted" style="border-top:1px solid var(--line);padding-top:14px"><button type="button" class="more" id="review-login">Log in</button> to review this bundle after your trip.</p>`}
@@ -282,7 +366,7 @@ async function viewMessages() {
     <form class="card pad stack" id="msg-form">
       <h2>Message the store</h2>
       <p class="small muted">Ask about sizing, dates or pickup. Staff reply here.</p>
-      <label class="f">Message<textarea class="in" name="content" id="msg-text" rows="5" required></textarea></label>
+      <label class="f">Message<textarea class="in" name="content" id="msg-text" rows="5" required maxlength="255"></textarea></label>
       <div data-msg hidden></div>
       <button class="btn btn-green" type="submit">Send to store</button>
     </form>
@@ -291,13 +375,22 @@ async function viewMessages() {
   onSubmit($("#msg-form"), async (d, f) => { await API.messageStore(me.userId, d.content.trim()); f.reset(); return "Sent. The store will reply here."; });
   loadInbox();
 }
+/* Links in store messages become clickable. A link to one of our bundles (like a finished custom kit)
+   becomes a button that opens it here. The text is escaped first, so a message can't inject HTML. */
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<]+/g, url => {
+    const kit = url.match(/#bundle-([\w-]+)/);
+    return kit ? `<a class="btn btn-orange btn-sm" href="#bundle-${kit[1]}">View and reserve your kit</a>`
+      : `<a href="${url}" target="_blank" rel="noopener">${url}</a>`;
+  });
+}
 async function loadInbox() {
   const box = $("#inbox");
   try {
     const msgs = await API.myMessages(me.userId);
     box.innerHTML = msgs && msgs.length ? msgs.map(m => `<div class="inbox-item">
       <div class="row between"><b>${esc(m.senderName || "Store")}</b><span class="small muted">${esc(m.dateSent || "")}</span></div>
-      <p>${esc(m.content)}</p>
+      <p>${linkify(m.content)}</p>
       <div><button type="button" class="btn btn-danger btn-sm" data-del="${esc(m.messageId)}">Delete</button></div></div>`).join("")
       : `<p class="empty">No messages from the store yet.</p>`;
     box.onclick = async e => {

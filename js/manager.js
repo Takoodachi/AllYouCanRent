@@ -5,11 +5,12 @@ let me = Session.get(APP);
 
 function route() {
   const h = location.hash.slice(1) || "products";
-  renderHeader("Manager", me ? [["products", "Products"], ["bundles", "Bundles"], ["sets", "Sets"], ["staff", "Staff accounts"]] : [], h, me,
+  renderHeader("Manager", me ? [["products", "Products"], ["bundles", "Bundles"], ["sets", "Sets"], ["requests", "Kit requests"], ["staff", "Staff accounts"]] : [], h, me,
     () => { Session.clear(APP); me = null; location.hash = ""; route(); });
   if (!me) return h === "new-manager" ? viewNewManager() : viewLogin();
   if (h === "bundles") return viewBundles();
   if (h === "sets") return viewSets();
+  if (h === "requests") return viewRequests();
   if (h === "staff") return viewStaff();
   return viewProducts();
 }
@@ -168,6 +169,86 @@ async function viewSets() {
     for (let i = 0; i < Math.max(1, +d.count); i++) made.push((await API.createSet(me.userId, { bundleId: d.bundleId, cleaningFee: +d.cleaningFee })).id);
     return `Created ${made.length} set${made.length > 1 ? "s" : ""}: ${made.map(setName).join(", ")}.`;
   });
+}
+
+/* ---------- custom kit requests ----------
+   Customers can't create bundles or sets, so they send a kit request as a message to the store.
+   Building one makes a bundle (tagged "custom", hidden from the shop) and a set, then messages the
+   customer a link to reserve it, and removes the request from the store inbox. */
+async function viewRequests() {
+  $("#app").innerHTML = `<h1 style="margin-bottom:6px">Kit requests</h1>
+    <p class="muted" style="margin-bottom:18px">Customers build these in the shop. <b>Build kit</b> creates the bundle and one set, then messages the customer a link to reserve it.</p>
+    <div class="stack" id="rq"><p class="muted">Loading…</p></div>`;
+  let reqs;
+  try {
+    const [msgs, products] = await Promise.all([API.storeInbox(me.userId), knownProducts()]);
+    const price = new Map(products.map(p => [p.name, p]));
+    // A big request arrives as several messages sharing a code. Put the parts back together.
+    const groups = new Map();
+    for (const m of msgs || []) {
+      const k = KitRequest.parse(m.content); if (!k) continue;
+      const key = `${m.senderUserId || m.userId}|${k.code}`;
+      if (!groups.has(key)) groups.set(key, { m, k: { ...k, items: [], note: "" }, msgs: [], parts: new Set() });
+      const g = groups.get(key);
+      g.msgs.push(m); g.parts.add(k.part); g.k.items.push(...k.items);
+      if (k.note) g.k.note = k.note;
+    }
+    reqs = [...groups.values()];
+    $("#rq").innerHTML = reqs.length ? reqs.map((r, i) => {
+      const waiting = r.parts.size < r.k.of;  // some parts haven't arrived
+      const missing = r.k.items.filter(it => !price.has(it.name));
+      const perDay = r.k.items.reduce((s, it) => s + it.qty * (+(price.get(it.name) || {}).dailyCharge || 0), 0);
+      return `<div class="card pad stack" data-i="${i}">
+        <div class="row between"><h2>${esc(r.m.userName || r.m.senderName || "Customer")}</h2><span class="small muted">Sent ${esc(r.m.dateSent || "")}</span></div>
+        <div class="small"><span class="muted">Dates wanted:</span> <b>${esc(r.k.startDate)} → ${esc(r.k.endDate)}</b></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="num">Qty</th><th>Item</th><th class="num">Per day</th></tr></thead><tbody>
+          ${r.k.items.map(it => { const p = price.get(it.name); return `<tr><td class="num">${it.qty}</td><td>${esc(it.name)}${p ? "" : ` <span class="pill bad">not in catalog</span>`}</td>
+            <td class="num">${p && p.dailyCharge != null ? money(it.qty * p.dailyCharge) : "–"}</td></tr>`; }).join("")}
+        </tbody></table></div>
+        <div class="row between"><span class="small muted">Estimated price</span><span class="price">${money(perDay)}/day</span></div>
+        ${r.k.note ? `<p class="small"><span class="muted">Note:</span> ${esc(r.k.note)}</p>` : ""}
+        <div class="row" style="align-items:end">
+          <label class="f" style="width:150px">Cleaning fee ($)<input class="in" type="number" min="0" step="0.01" value="10" data-fee></label>
+          <button type="button" class="btn btn-green" data-build ${missing.length || waiting ? "disabled" : ""}>Build kit</button>
+          <button type="button" class="btn btn-quiet" data-delete>Delete request</button>
+        </div>
+        ${waiting ? `<p class="small muted">Only ${r.parts.size} of ${r.k.of} parts of this request arrived. Ask the customer to send it again, then delete this one.</p>` : ""}
+        ${missing.length ? `<p class="small muted">Add the missing items on the Products page first, or delete the request and message the customer.</p>` : ""}
+        <div data-msg hidden></div></div>`;
+    }).join("") : `<div class="card empty">No kit requests right now.</div>`;
+  } catch (e) { $("#rq").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+
+  $("#rq").onclick = async e => {
+    const btn = e.target.closest("[data-build],[data-delete]"); if (!btn) return;
+    const card = btn.closest("[data-i]"), r = reqs[+card.dataset.i], msg = card.querySelector("[data-msg]");
+    const customerId = r.m.senderUserId || r.m.userId, who = r.m.userName || r.m.senderName || "customer";
+    if (btn.matches("[data-delete]") && !confirm(`Delete ${who}'s kit request? This can't be undone.`)) return;
+    btn.disabled = true;
+    try {
+      const removeRequest = () => Promise.all(r.msgs.map(m => API.deleteStoreMessage(me.userId, m.messageId)));
+      if (btn.matches("[data-delete]")) { await removeRequest(); toast("Request deleted"); return viewRequests(); }
+      // Each step is remembered on r, so pressing Build again after a failure doesn't make a second bundle.
+      const name = `Custom kit for ${who}, ${r.k.startDate}`;
+      r.bundleId = r.bundleId || (await API.createBundle(me.userId, { name, tags: ["custom"],
+        products: r.k.items.flatMap(it => Array(it.qty).fill(it.name)) })).id;
+      r.setId = r.setId || (await API.createSet(me.userId, { bundleId: r.bundleId, cleaningFee: +card.querySelector("[data-fee]").value || 0 })).id;
+      if (!r.replied) {
+        const b = await API.getBundle(r.bundleId);
+        const link = new URL("index.html#bundle-" + r.bundleId, location.href).href;
+        // Kept short: messages over 255 characters are rejected by the server.
+        await API.messageCustomer(me.userId, customerId,
+          `Your custom kit is ready, ${money(b.dailyCharge)} a day. Reserve it for ${r.k.startDate} to ${r.k.endDate} here:\n${link}`);
+        r.replied = true;
+      }
+      await removeRequest();
+      toast(`Built the kit and sent ${who} a link`); viewRequests();
+    } catch (err) {
+      const step = btn.matches("[data-delete]") ? "deleting the request" : !r.bundleId ? "creating the bundle"
+        : !r.setId ? "creating the set" : !r.replied ? "messaging the customer" : "removing the request";
+      say(msg, "err", `Stopped while ${step}: ${err.message} Press the button again to retry from there.`);
+      btn.disabled = false;
+    }
+  };
 }
 
 window.addEventListener("hashchange", route);
