@@ -164,7 +164,7 @@ async function viewMessages() {
       <h2>Message a customer</h2>
       <p class="small muted">Click Reply on a message to fill in the customer.</p>
       <label class="f">Customer user id<input class="in" name="to" id="send-to" required></label>
-      <label class="f">Message<textarea class="in" name="content" id="send-text" rows="5" required></textarea></label>
+      <label class="f">Message<textarea class="in" name="content" id="send-text" rows="5" required maxlength="255"></textarea></label>
       <div data-msg hidden></div>
       <button class="btn btn-green" type="submit">Send</button>
     </form></div>`;

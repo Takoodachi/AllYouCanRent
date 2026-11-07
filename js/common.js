@@ -132,6 +132,43 @@ function setName(id) {
   return `${SET_WORDS[0][h % 16]} ${SET_WORDS[1][(h >>> 4) % 16]} set`;
 }
 
+/* The server rejects messages (and reviews) longer than 255 characters. */
+const MSG_MAX = 255;
+
+/* Custom kit requests travel as normal messages to the store, because customers can't create
+   bundles or sets themselves. The text stays readable in the staff inbox. A big kit doesn't fit in
+   255 characters, so it is split into parts that share a code:
+     Custom kit request K7Q2 1/2
+     Dates: 2026-11-20 to 2026-11-22
+     - 2 × Mummy sleeping bag (20°F)
+     Note: ...                                                     */
+const KIT_HEAD = "Custom kit request";
+const KitRequest = {
+  // → the message texts to send, each within MSG_MAX
+  messages({ startDate, endDate, items, note }) {
+    const code = Math.random().toString(36).slice(2, 6).toUpperCase();
+    const top = (i, n) => `${KIT_HEAD} ${code} ${i}/${n}\nDates: ${startDate} to ${endDate}`;
+    const room = MSG_MAX - top(99, 99).length - 1;  // what's left for item lines in each message
+    const lines = [...items.map(i => `- ${i.qty} × ${i.name}`), ...(note ? [`Note: ${note.replace(/\s+/g, " ")}`] : [])];
+    const groups = [[]];
+    for (const line of lines) {
+      const g = groups[groups.length - 1];
+      if (g.length && [...g, line].join("\n").length > room) groups.push([line]); else g.push(line);
+    }
+    return groups.map((g, i) => `${top(i + 1, groups.length)}\n${g.join("\n")}`);
+  },
+  // One message → { code, part, of, startDate, endDate, items: [{ qty, name }], note }, or null if it isn't a kit request
+  parse(text) {
+    const lines = String(text || "").split(/\r?\n/).map(l => l.trim());
+    const head = lines[0].startsWith(KIT_HEAD + " ") && lines[0].slice(KIT_HEAD.length + 1).match(/^(\w+) (\d+)\/(\d+)$/);
+    const dates = (lines[1] || "").match(/^Dates: (\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})$/);
+    if (!head || !dates) return null;
+    return { code: head[1], part: +head[2], of: +head[3], startDate: dates[1], endDate: dates[2],
+      items: lines.map(l => l.match(/^- (\d+) × (.+)$/)).filter(Boolean).map(m => ({ qty: +m[1], name: m[2] })),
+      note: (lines.find(l => l.startsWith("Note: ")) || "").slice(6) };
+  }
+};
+
 /* Product image if it has one, otherwise the illustration. */
 function bundleImage(b, seed) {
   const img = (b.products || []).map(p => p.imageUrl).find(u => u && /^https?:\/\//.test(u));
