@@ -40,6 +40,8 @@ NOTES
   - Invoices: staff can load an invoice at any time, but customers get HTTP 403. So "Send invoice to
     customer" on the rental desk sends it as a message (InvoiceNote in js/common.js, split into parts
     if long), and My reservations shows the newest one. Re-sending an identical invoice is skipped.
+  - Today (the employee app's first tab): pickups, returns due, overdue sets and every reservation for
+    a chosen day, with Check out / Return / Open buttons. Uses the same list as the rental desk.
   - Rental desk: it lists the reservations of every customer who has messaged the store (including the
     reservation code notes), with their status (Reserved, Checked out, Returned). "Charges so far"
     comes from the staff invoice, so repairs already added show after a refresh and for every employee.
