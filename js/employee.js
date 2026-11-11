@@ -5,20 +5,81 @@ const STAFF = ["employee", "manager"];
 let me = Session.get(APP);
 
 function route() {
-  const h = location.hash.slice(1) || "desk";
+  const h = location.hash.slice(1) || "today";
   scrollTo(0, 0);  // each tab starts at the top
-  renderHeader("Employee", me ? [["desk", "Rental desk"], ["messages", "Messages"], ["sets", "Add sets"]] : [], h, me,
+  renderHeader("Employee", me ? [["today", "Today"], ["desk", "Rental desk"], ["messages", "Messages"], ["sets", "Add sets"]] : [], h, me,
     () => { Session.clear(APP); me = null; route(); });
   if (!me) return viewLogin();
+  if (h === "desk") return viewDesk();
   if (h === "messages") return viewMessages();
   if (h === "sets") return viewSets();
-  return viewDesk();
+  return viewToday();
 }
 
 function viewLogin() {
   $("#app").innerHTML = loginView("Staff log in",
     `<p class="small muted">Employee accounts are created by a manager in the <a href="manager.html">manager app</a>.</p>`);
   wireLogin(STAFF, APP, u => { me = u; toast("Logged in as " + u.userName); route(); });
+}
+
+/* ---------- today: the day's pickups, returns and reservations ---------- */
+let dashDay = today(), openNext = null;  // openNext: a reservation the desk should open when it loads
+
+async function viewToday() {
+  const isToday = dashDay === today();
+  const nice = new Date(dashDay + "T12:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  $("#app").innerHTML = `<div class="row between" style="margin-bottom:18px;align-items:end">
+      <div><p class="eyebrow">${isToday ? "Today" : "Day view"}</p><h1>${esc(nice)}</h1></div>
+      <div class="row"><input class="in" type="date" id="dash-day" value="${dashDay}" aria-label="Show another day" style="width:auto">
+        ${isToday ? "" : `<button type="button" class="btn btn-quiet btn-sm" id="dash-today">Back to today</button>`}
+        <button type="button" class="btn btn-quiet btn-sm" id="dash-refresh">Refresh</button></div>
+    </div>
+    <div id="dash"><p class="muted">Loading…</p></div>`;
+  $("#dash-day").onchange = e => { dashDay = e.target.value || today(); viewToday(); };
+  if ($("#dash-today")) $("#dash-today").onclick = () => { dashDay = today(); viewToday(); };
+  $("#dash-refresh").onclick = viewToday;
+  let all;
+  try { all = await fetchReservations(); } catch (e) { $("#dash").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+
+  const day = dashDay;
+  const pickups = all.filter(r => r.startDate === day && r.status === "RESERVED");
+  const returns = all.filter(r => r.endDate === day && r.status === "CHECKED_OUT");
+  const overdue = day >= today() ? all.filter(r => r.endDate < day && r.status === "CHECKED_OUT") : [];  // still out after their end date
+  const onDay = all.filter(r => r.startDate <= day && day <= r.endDate);
+  const section = (title, hint, list, action, empty) => `<div class="card pad stack">
+      <div class="row between"><h2>${title} <span class="muted">(${list.length})</span></h2><span class="small muted">${hint}</span></div>
+      ${list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Customer</th><th>Bundle</th><th>Dates</th><th>Status</th><th></th></tr></thead><tbody>
+        ${list.map(r => `<tr><td><b class="code">${esc(resCode(r.reservationId))}</b></td><td>${esc(r.userName)}</td><td>${esc(r.bundleName)}</td>
+          <td class="small">${esc(r.startDate)} → ${esc(r.endDate)}</td><td>${statusPill(r.status)}</td>
+          <td class="num"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
+            ${action ? `<button type="button" class="btn btn-green btn-sm" data-act="${action}" data-rid="${esc(r.reservationId)}">${action === "checkout" ? "Check out" : "Return"}</button>` : ""}
+            <button type="button" class="btn btn-ghost btn-sm" data-act="open" data-rid="${esc(r.reservationId)}">Open</button></div></td></tr>`).join("")}
+        </tbody></table></div>` : `<p class="empty">${empty}</p>`}</div>`;
+
+  $("#dash").innerHTML = `<div class="stats" style="margin-bottom:18px">
+      <div class="card stat"><span class="small muted">Pickups</span><b>${pickups.length}</b></div>
+      <div class="card stat"><span class="small muted">Returns due</span><b>${returns.length}</b></div>
+      <div class="card stat ${overdue.length ? "alert" : ""}"><span class="small muted">Overdue</span><b>${overdue.length}</b></div>
+      <div class="card stat"><span class="small muted">Reservations ${isToday ? "today" : "this day"}</span><b>${onDay.length}</b></div>
+    </div>
+    <div class="stack">
+      ${section("Pickups", "Starting this day, not collected yet", pickups, "checkout", "No pickups.")}
+      ${section("Returns due", "Ending this day, still out", returns, "return", "No returns due.")}
+      ${overdue.length ? section("Overdue", "Past their end date, still out", overdue, "return", "") : ""}
+      ${section(`All reservations ${isToday ? "today" : "this day"}`, "Every reservation covering this day", onDay, "", "No reservations cover this day.")}
+    </div>`;
+
+  $("#dash").onclick = async e => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    const rid = b.dataset.rid;
+    if (b.dataset.act === "open") { openNext = rid; location.hash = "desk"; return; }
+    b.disabled = true;
+    try {
+      if (b.dataset.act === "checkout") { await API.checkout(me.userId, rid); toast(`Set ${resCode(rid)} checked out`); }
+      else { await API.returnSet(me.userId, rid); toast(`Set ${resCode(rid)} returned. Add any charges on the desk.`); }
+      viewToday();
+    } catch (err) { toast(err.message); b.disabled = false; }
+  };
 }
 
 /* ---------- rental desk ---------- */
@@ -53,19 +114,23 @@ async function viewDesk() {
     openReservation(id);
   });
   await loadReservations();
+  if (openNext) { const id = openNext; openNext = null; await openReservation(id); }  // sent here from Today
 }
 
 /* The server only lists one user's reservations at a time, and staff have none. So the desk lists the
    reservations of every customer the store knows: anyone who has messaged the store, which includes
-   the code note the shop sends whenever a customer reserves. */
+   the code note the shop sends whenever a customer reserves. Sets that are out first, then pickups. */
+async function fetchReservations() {
+  inbox = await API.storeInbox(me.userId) || [];
+  const customers = [...new Set(inbox.filter(m => !m.fromStore).map(m => m.senderUserId || m.userId).filter(Boolean))];
+  const lists = await Promise.all(customers.map(id =>
+    API.listReservations(id).then(l => (l || []).map(r => ({ ...r, customerId: id })), () => [])));
+  return lists.flat().sort((a, b) => (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3)
+    || String(a.startDate).localeCompare(String(b.startDate)));
+}
 async function loadReservations() {
   try {
-    inbox = await API.storeInbox(me.userId) || [];
-    const customers = [...new Set(inbox.filter(m => !m.fromStore).map(m => m.senderUserId || m.userId).filter(Boolean))];
-    const lists = await Promise.all(customers.map(id =>
-      API.listReservations(id).then(l => (l || []).map(r => ({ ...r, customerId: id })), () => [])));
-    reservations = lists.flat().sort((a, b) => (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3)
-      || String(a.startDate).localeCompare(String(b.startDate)));
+    reservations = await fetchReservations();
     drawList();
     if (current) await openReservation(current.reservationId);
   } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }

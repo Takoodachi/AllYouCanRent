@@ -109,6 +109,12 @@ dialog.modal .auth{margin:0}
 .tabs-inline button.on{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
 
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
+/* Employee dashboard count tiles */
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.stat b{font-family:var(--display);font-size:1.9rem;font-weight:800;line-height:1}
+.stat.alert b{color:var(--danger)}
 /* Browse filters: search box and activity dropdown side by side, stacked on phones */
 .filters{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:10px}
 @media (max-width:640px){.filters{grid-template-columns:1fr}}
