@@ -49,6 +49,9 @@ NOTES
     (the server only accepts reviews from customers who rented and returned the bundle).
   - The sun/moon button in every header switches light and dark mode. The choice is saved in the
     browser (localStorage "rental:theme"); without one, the site follows the device setting.
+  - Favorites: the heart on a bundle saves it; the Favorites chip on Browse shows only saved bundles.
+    The server has nowhere to keep them, so they're saved in the browser per account (localStorage
+    "rental:favs:<userId>"). A guest's favorites move into the account when they log in.
 
 PHOTOS
 Bundle photos come from Unsplash (unsplash.com) and are free to use under the Unsplash License.
