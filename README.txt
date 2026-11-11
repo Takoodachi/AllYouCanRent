@@ -37,6 +37,14 @@ NOTES
     request as message(s) to the store (format in KitRequest, js/common.js; big kits are split into
     parts). Manager > Kit requests builds it with one click: a bundle tagged "custom" (hidden from
     the shop), one set, and a message to the customer with a link to reserve it.
+  - Invoices: staff can load an invoice at any time, but customers get HTTP 403. So "Send invoice to
+    customer" on the rental desk sends it as a message (InvoiceNote in js/common.js, split into parts
+    if long), and My reservations shows the newest one. Re-sending an identical invoice is skipped.
+  - Rental desk: it lists the reservations of every customer who has messaged the store (including the
+    reservation code notes), with their status (Reserved, Checked out, Returned). "Charges so far"
+    comes from the staff invoice, so repairs already added show after a refresh and for every employee.
+  - Reviews: js/sample-reviews.js holds sample reviews for the demo store, shown alongside real ones
+    (the server only accepts reviews from customers who rented and returned the bundle).
   - The sun/moon button in every header switches light and dark mode. The choice is saved in the
     browser (localStorage "rental:theme"); without one, the site follows the device setting.
 
