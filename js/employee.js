@@ -22,12 +22,12 @@ function viewLogin() {
 }
 
 /* ---------- rental desk ---------- */
-let reservations = [], current = null;
-const PILL = s => { const v = String(s || "").toLowerCase(); return v.includes("return") || v.includes("invoice") ? "" : v.includes("out") ? "warn" : "warn"; };
+let reservations = [], current = null, inbox = [];
+const STATUS_ORDER = { CHECKED_OUT: 0, RESERVED: 1, RETURNED: 2 };  // sets that are out first, then pickups
 
 async function viewDesk() {
   $("#app").innerHTML = `<h1 style="margin-bottom:6px">Rental desk</h1>
-    <p class="muted" style="margin-bottom:18px">Pick a reservation to check the set out, take it back, record damage or losses, and generate the invoice.</p>
+    <p class="muted" style="margin-bottom:18px">Pick a reservation to check the set out, take it back, record damage or losses, and send the invoice.</p>
     <div class="side-col">
       <div class="card pad stack">
         <form class="stack" id="lookup">
@@ -37,33 +37,47 @@ async function viewDesk() {
           <button class="btn btn-green btn-sm" type="submit">Open reservation</button>
         </form>
         <div class="row between"><h2>Reservations</h2><button type="button" class="btn btn-quiet btn-sm" id="refresh">Refresh</button></div>
-        <input class="in" id="rfilter" placeholder="Filter by number, customer or bundle" aria-label="Filter reservations">
+        <input class="in" id="rfilter" placeholder="Filter by code, customer, bundle or status" aria-label="Filter reservations">
         <div id="rlist"><p class="muted small">Loading…</p></div>
       </div>
       <div id="desk"><div class="card pad empty">Select a reservation.</div></div>
     </div>`;
   $("#refresh").onclick = loadReservations;
   $("#rfilter").oninput = drawList;
-  // A short code is turned back into the full number using the notes the shop sends the store.
   onSubmit($("#lookup"), async d => {
-    const id = ResNote.resolve(d.rid, await API.storeInbox(me.userId) || []);
+    // A code is matched against the list first, then against the code notes the shop sends the store.
+    const key = d.rid.trim().toLowerCase().replace(/[\s-]/g, "");
+    const listed = key.length >= 8 && reservations.find(r => r.reservationId.replace(/-/g, "").toLowerCase().startsWith(key));
+    const id = listed ? listed.reservationId : ResNote.resolve(d.rid, inbox);
     if (!id) throw new Error(`No reservation found for "${d.rid.trim()}". Check the code with the customer.`);
     openReservation(id);
   });
   await loadReservations();
 }
+
+/* The server only lists one user's reservations at a time, and staff have none. So the desk lists the
+   reservations of every customer the store knows: anyone who has messaged the store, which includes
+   the code note the shop sends whenever a customer reserves. */
 async function loadReservations() {
-  try { reservations = await API.listReservations(me.userId) || []; drawList(); if (current) openReservation(current.reservationId); }
-  catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  try {
+    inbox = await API.storeInbox(me.userId) || [];
+    const customers = [...new Set(inbox.filter(m => !m.fromStore).map(m => m.senderUserId || m.userId).filter(Boolean))];
+    const lists = await Promise.all(customers.map(id =>
+      API.listReservations(id).then(l => (l || []).map(r => ({ ...r, customerId: id })), () => [])));
+    reservations = lists.flat().sort((a, b) => (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3)
+      || String(a.startDate).localeCompare(String(b.startDate)));
+    drawList();
+    if (current) await openReservation(current.reservationId);
+  } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
 function drawList() {
   const f = ($("#rfilter")?.value || "").toLowerCase();
-  const list = reservations.filter(r => !f || [resCode(r.reservationId), r.reservationId, r.userName, r.bundleName].join(" ").toLowerCase().includes(f));
+  const list = reservations.filter(r => !f || [resCode(r.reservationId), r.reservationId, r.userName, r.bundleName, r.status].join(" ").toLowerCase().includes(f));
   $("#rlist").innerHTML = list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Customer</th><th>Bundle</th><th>Dates</th><th>Status</th></tr></thead><tbody>
     ${list.map(r => `<tr data-rid="${esc(r.reservationId)}" style="cursor:pointer;${current && current.reservationId === r.reservationId ? "background:var(--green-soft)" : ""}">
       <td><b class="code">${esc(resCode(r.reservationId))}</b></td><td>${esc(r.userName)}</td><td>${esc(r.bundleName)}</td><td class="small">${esc(r.startDate)} → ${esc(r.endDate)}</td>
-      <td><span class="pill ${PILL(r.status)}">${esc(r.status)}</span></td></tr>`).join("")}</tbody></table></div>`
-    : `<p class="empty">${reservations.length ? "No reservations match." : "None listed. The server only lists a user's own reservations, so open a customer's by code above."}</p>`;
+      <td>${statusPill(r.status)}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="empty">${reservations.length ? "No reservations match." : "No reservations yet. Customers' reservations show here once they reserve or message the store."}</p>`;
   $("#rlist").onclick = e => { const tr = e.target.closest("[data-rid]"); if (tr) openReservation(tr.dataset.rid); };
 }
 
@@ -78,27 +92,42 @@ async function findItems(r) {
   } catch (e) { return null; }
 }
 
-/* A reservation opened by number isn't in the list, so fill in its details from the invoice. */
+/* A reservation that isn't in the list (its customer hasn't messaged the store): the invoice names the
+   customer, and that customer's reservation list gives the status. */
 async function lookUp(id) {
   try {
     const inv = await API.invoice(me.userId, id);
-    return { reservationId: id, userName: inv.customerName, bundleName: inv.bundleName, setId: inv.setId, startDate: inv.startDate, endDate: inv.endDate };
+    const theirs = await API.listReservations(inv.customerId).catch(() => []);
+    const r = (theirs || []).find(x => x.reservationId === id) || {};
+    return { reservationId: id, customerId: inv.customerId, userName: inv.customerName, bundleName: inv.bundleName,
+      setId: inv.setId, startDate: inv.startDate, endDate: inv.endDate, ...r };
   } catch (e) { return { reservationId: id, noDetails: true }; }
 }
 
-async function openReservation(id) {
+const NEXT_STEP = {
+  RESERVED: "Waiting for pickup. Check the set out when the customer collects it.",
+  CHECKED_OUT: r => `Out with the customer, due back ${r.endDate}. Return the set when it comes back.`,
+  RETURNED: "Back in the store. Add any repair charges or lost items, then send the invoice."
+};
+
+/* note: a short line shown at the top of the panel, like "Set checked out". */
+async function openReservation(id, note = "") {
   current = reservations.find(r => String(r.reservationId) === String(id)) || await lookUp(id);
   drawList();
-  const r = current;
-  const st = String(r.status || "").toLowerCase();
-  const items = await findItems(r);
+  const r = current, status = String(r.status || "").toUpperCase();
+  // The staff invoice lists every charge so far (rental, cleaning, repairs, lost items), straight from the server.
+  const [items, inv] = await Promise.all([findItems(r), API.invoice(me.userId, r.reservationId).catch(() => null)]);
+  const charges = (inv && inv.charges) || [];
+  const next = NEXT_STEP[status];
   const itemField = items && items.length
     ? `<select class="in" name="itemId" required>${items.map(i => `<option value="${esc(i.itemId)}">${esc(i.productName)} (worth ${money(i.depreciatedValue)} now)</option>`).join("")}</select>`
     : `<input class="in" name="itemId" required placeholder="Item id">`;
 
   $("#desk").innerHTML = `<div class="stack">
     <div class="card pad stack">
-      <div class="row between"><h2>Reservation <span class="code">${esc(resCode(r.reservationId))}</span></h2>${r.status ? `<span class="pill ${PILL(r.status)}">${esc(r.status)}</span>` : ""}</div>
+      ${note ? `<div class="msg ok">${esc(note)}</div>` : ""}
+      <div class="row between"><h2>Reservation <span class="code">${esc(resCode(r.reservationId))}</span></h2>${statusPill(r.status)}</div>
+      ${next ? `<p class="small">${esc(typeof next === "function" ? next(r) : next)}</p>` : ""}
       <p class="small muted">Full number: ${esc(r.reservationId)}</p>
       ${r.noDetails ? `<p class="small muted">Couldn't load details for this reservation. Check it matches the customer's.</p>` : ""}
       <div class="grid-2 small">
@@ -107,10 +136,17 @@ async function openReservation(id) {
         <div><span class="muted">Dates</span><br>${esc(r.startDate || "")} → ${esc(r.endDate || "")}</div>
       </div>
       <div class="row">
-        <button type="button" class="btn btn-green" data-act="checkout">Check out set</button>
-        <button type="button" class="btn btn-ghost" data-act="return">Return set</button>
+        <button type="button" class="btn btn-green" data-act="checkout" ${status && status !== "RESERVED" ? "disabled" : ""}>Check out set</button>
+        <button type="button" class="btn btn-ghost" data-act="return" ${status && status !== "CHECKED_OUT" ? "disabled" : ""}>Return set</button>
       </div>
       <div data-msg hidden id="desk-msg"></div>
+    </div>
+    <div class="card pad stack">
+      <h3>Charges so far</h3>
+      ${inv ? `<div class="lines">${charges.map(c => `<div><span>${esc(chargeLabel(c))}</span><span>${money(c.amount)}</span></div>`).join("")}
+        <div class="total"><span>Total so far</span><span class="price">${money(inv.total)}</span></div></div>
+        <p class="small muted">From the store's system, so it's the same for every employee and after a refresh. The cleaning fee is added when the set is returned.</p>`
+        : `<p class="small muted">Couldn't load the charges for this reservation.</p>`}
     </div>
     <form class="card pad stack" id="charge-form">
       <h3>Repair charge</h3>
@@ -129,8 +165,9 @@ async function openReservation(id) {
     </form>
     <div class="card pad stack">
       <h3>Invoice</h3>
-      <p class="small muted">Generate it after the set is returned and charges are entered. The customer pays this total.</p>
-      <button type="button" class="btn btn-orange" data-act="invoice">Generate invoice</button>
+      <p class="small muted">Send it after the set is returned and all charges are in. The customer gets it in Messages and under My reservations.</p>
+      <button type="button" class="btn btn-orange" data-act="invoice">Send invoice to customer</button>
+      <div data-msg hidden id="invoice-msg"></div>
       <div id="invoice"></div>
     </div></div>`;
 
@@ -138,29 +175,53 @@ async function openReservation(id) {
     const b = e.target.closest("[data-act]"); if (!b) return;
     b.disabled = true;
     try {
-      if (b.dataset.act === "checkout") { await API.checkout(me.userId, r.reservationId); toast("Set checked out"); await loadReservations(); }
-      else if (b.dataset.act === "return") { await API.returnSet(me.userId, r.reservationId); toast("Set returned"); await loadReservations(); }
-      else { showInvoice(await API.invoice(me.userId, r.reservationId)); b.disabled = false; }
+      if (b.dataset.act === "checkout") { await API.checkout(me.userId, r.reservationId); await reopen(r, "Set checked out."); }
+      else if (b.dataset.act === "return") { await API.returnSet(me.userId, r.reservationId); await reopen(r, "Set returned. The cleaning fee is now on the bill."); }
+      else { say($("#invoice-msg"), "ok", await sendInvoice(r)); b.disabled = false; }
     } catch (err) {
-      if (b.dataset.act === "invoice") $("#invoice").innerHTML = `<div class="msg err">${esc(err.message)}</div>`; else say($("#desk-msg"), "err", err.message);
+      say($(b.dataset.act === "invoice" ? "#invoice-msg" : "#desk-msg"), "err", err.message);
       b.disabled = false;
     }
   };
-  onSubmit($("#charge-form"), async (d, f) => {
-    await API.addCharge(me.userId, { reservationId: r.reservationId, description: d.description.trim(), amount: +d.amount });
-    f.reset(); return `Added ${money(d.amount)} repair charge.`;
+  onSubmit($("#charge-form"), async d => {
+    const desc = d.description.trim(), amount = +d.amount;
+    const same = charges.some(c => c.type === "REPAIR" && String(c.description).trim().toLowerCase() === desc.toLowerCase() && +c.amount === amount);
+    if (same && !confirm(`"${desc}" for ${money(amount)} is already on this reservation. Add it again?`)) return;
+    await API.addCharge(me.userId, { reservationId: r.reservationId, description: desc, amount });
+    await reopen(r, `Added ${money(amount)} repair charge.`);
   });
   onSubmit($("#lost-form"), async d => {
     await API.reportLost(me.userId, { reservationId: r.reservationId, itemId: d.itemId.trim() });
-    return "Lost item recorded. It will show on the invoice.";
+    await reopen(r, "Lost item recorded.");
   });
+}
+/* After a change: reload the list (statuses) and redraw this reservation with a note. */
+async function reopen(r, note) {
+  const keep = current; current = null;
+  await loadReservations();
+  current = keep;
+  toast(note);
+  await openReservation(r.reservationId, note);
+}
+
+/* Shows the invoice and sends it to the customer as a message, unless they already have this exact one. */
+async function sendInvoice(r) {
+  const inv = await API.invoice(me.userId, r.reservationId);
+  showInvoice(inv);
+  const code = resCode(r.reservationId), customerId = inv.customerId || r.customerId;
+  const had = InvoiceNote.latest(await API.myMessages(customerId).catch(() => []))[code];
+  const now = { lines: (inv.charges || []).map(c => ({ label: chargeLabel(c), amount: money(c.amount) })), total: money(inv.total) };
+  if (had && had.total === now.total && JSON.stringify(had.lines) === JSON.stringify(now.lines))
+    return `${inv.customerName || "The customer"} already has this invoice. They can see it under My reservations.`;
+  for (const text of InvoiceNote.messages(inv, code)) await API.messageCustomer(me.userId, customerId, text);
+  return `Invoice sent to ${inv.customerName || "the customer"}. They can see it in Messages and under My reservations.`;
 }
 function showInvoice(inv) {
   $("#invoice").innerHTML = `<div class="lines" style="margin-top:6px">
     <div class="small muted"><span>Customer</span><span>${esc(inv.customerName || "")}</span></div>
     <div class="small muted"><span>Bundle</span><span>${esc(inv.bundleName || "")}${inv.setId ? ", " + esc(setName(inv.setId)) : ""}</span></div>
     <div class="small muted"><span>Dates</span><span>${esc(inv.startDate || "")} → ${esc(inv.endDate || "")}</span></div>
-    ${(inv.charges || []).map(c => `<div><span>${esc(c.description || c.type)}</span><span>${money(c.amount)}</span></div>`).join("")}
+    ${(inv.charges || []).map(c => `<div><span>${esc(chargeLabel(c))}</span><span>${money(c.amount)}</span></div>`).join("")}
     <div class="total"><span>Total due</span><span class="price">${money(inv.total)}</span></div></div>`;
 }
 

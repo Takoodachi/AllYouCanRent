@@ -182,20 +182,76 @@ const ResNote = {
   }
 };
 
+/* Lines → message texts of at most MSG_MAX characters. top(i, n) is the header of part i of n;
+   lines that don't fit go on to the next part. */
+function packMessages(top, lines) {
+  const room = MSG_MAX - top(99, 99).length - 1;  // what's left for lines in each message
+  const groups = [[]];
+  for (const line of lines) {
+    const g = groups[groups.length - 1];
+    if (g.length && [...g, line].join("\n").length > room) groups.push([line]); else g.push(line);
+  }
+  return groups.map((g, i) => `${top(i + 1, groups.length)}\n${g.join("\n")}`);
+}
+
+/* Reservation status as a coloured pill, the same in the shop and at the desk:
+   RESERVED (orange), CHECKED_OUT (green), RETURNED (grey). */
+function statusPill(status) {
+  const s = String(status || "").toUpperCase();
+  const tone = s === "RESERVED" ? "warn" : s === "CHECKED_OUT" ? "" : "done";
+  return `<span class="pill ${tone}">${esc(s ? s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ") : "Unknown")}</span>`;
+}
+
+/* One invoice charge as a readable line label. */
+const chargeLabel = c => c.type === "REPAIR" ? `Repair: ${c.description}` : c.type === "LOST" ? `Lost item: ${c.description}` : c.description || c.type;
+
+/* Invoices reach customers as messages from the store, because the server won't let a customer
+   load an invoice (HTTP 403). Parts share a stamp, and a newer stamp means a newer invoice:
+     Invoice 7137-63D1 MHB2K9QX 1/1
+     Rental of Mountain Bike Day for 3 day(s): $231.00
+     Total: $341.00                                                    */
+const InvoiceNote = {
+  messages(inv, code) {
+    const stamp = Date.now().toString(36).toUpperCase();
+    return packMessages((i, n) => `Invoice ${code} ${stamp} ${i}/${n}`,
+      [...(inv.charges || []).map(c => `${chargeLabel(c)}: ${money(c.amount)}`), `Total: ${money(inv.total)}`]);
+  },
+  // One message → { code, stamp, part, of, lines: [{ label, amount }], total }, or null
+  parse(text) {
+    const lines = String(text || "").split(/\r?\n/).map(l => l.trim());
+    const head = lines[0].match(/^Invoice (\w{4}-\w{4}) (\w+) (\d+)\/(\d+)$/);
+    if (!head) return null;
+    const rows = lines.slice(1).map(l => l.match(/^(.*): (\$-?[\d.]+)$/)).filter(Boolean).map(m => ({ label: m[1], amount: m[2] }));
+    const total = rows.find(x => x.label === "Total");
+    return { code: head[1], stamp: head[2], part: +head[3], of: +head[4], lines: rows.filter(x => x !== total), total: total && total.amount };
+  },
+  // The newest complete invoice for each reservation code in a list of messages → { code: { lines, total, sentOn } }
+  latest(msgs) {
+    const byStamp = new Map();
+    for (const m of msgs || []) {
+      const p = InvoiceNote.parse(m.content); if (!p) continue;
+      const key = `${p.code} ${p.stamp}`;
+      if (!byStamp.has(key)) byStamp.set(key, { code: p.code, stamp: p.stamp, of: p.of, parts: [], sentOn: m.dateSent });
+      byStamp.get(key).parts[p.part - 1] = p;
+    }
+    const out = {};
+    for (const g of byStamp.values()) {
+      const parts = g.parts.filter(Boolean);
+      if (parts.length < g.of) continue;  // not all parts arrived
+      if (out[g.code] && parseInt(out[g.code].stamp, 36) > parseInt(g.stamp, 36)) continue;
+      out[g.code] = { stamp: g.stamp, sentOn: g.sentOn, lines: parts.flatMap(p => p.lines), total: parts.map(p => p.total).find(Boolean) };
+    }
+    return out;
+  }
+};
+
 const KIT_HEAD = "Custom kit request";
 const KitRequest = {
   // → the message texts to send, each within MSG_MAX
   messages({ startDate, endDate, items, note }) {
     const code = Math.random().toString(36).slice(2, 6).toUpperCase();
-    const top = (i, n) => `${KIT_HEAD} ${code} ${i}/${n}\nDates: ${startDate} to ${endDate}`;
-    const room = MSG_MAX - top(99, 99).length - 1;  // what's left for item lines in each message
-    const lines = [...items.map(i => `- ${i.qty} × ${i.name}`), ...(note ? [`Note: ${note.replace(/\s+/g, " ")}`] : [])];
-    const groups = [[]];
-    for (const line of lines) {
-      const g = groups[groups.length - 1];
-      if (g.length && [...g, line].join("\n").length > room) groups.push([line]); else g.push(line);
-    }
-    return groups.map((g, i) => `${top(i + 1, groups.length)}\n${g.join("\n")}`);
+    return packMessages((i, n) => `${KIT_HEAD} ${code} ${i}/${n}\nDates: ${startDate} to ${endDate}`,
+      [...items.map(i => `- ${i.qty} × ${i.name}`), ...(note ? [`Note: ${note.replace(/\s+/g, " ")}`] : [])]);
   },
   // One message → { code, part, of, startDate, endDate, items: [{ qty, name }], note }, or null if it isn't a kit request
   parse(text) {

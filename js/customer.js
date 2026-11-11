@@ -101,7 +101,10 @@ function showSignup() {
 /* ---------- browse ---------- */
 const label = t => t.charAt(0).toUpperCase() + t.slice(1);  // "cross-country ski" → "Cross-country ski"
 /* Every bundle with its details. The list call only returns ids and names. */
-const loadBundles = async () => Promise.all((await API.listBundles()).map(b => API.getBundle(b.bundleId).catch(() => b)));
+const loadBundles = async () => Promise.all((await API.listBundles()).map(b => API.getBundle(b.bundleId).then(withSamples, () => b)));
+/* A bundle's real reviews plus the demo store's sample reviews (js/sample-reviews.js), newest first. */
+const withSamples = b => ({ ...b, reviews: [...(b.reviews || []), ...((typeof SAMPLE_REVIEWS === "object" ? SAMPLE_REVIEWS : {})[b.name] || [])]
+  .sort((x, y) => String(y.dateEntered || "").localeCompare(String(x.dateEntered || ""))) });
 // Kits built for one customer are tagged "custom". They stay out of the shop; the customer gets a link.
 const isCustomKit = b => (b.tags || []).includes("custom");
 
@@ -273,7 +276,7 @@ async function viewKit() {
 async function viewBundle(id) {
   $("#app").innerHTML = `<p class="muted">Loading bundle…</p>`;
   let b;
-  try { b = await API.getBundle(id); } catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+  try { b = withSamples(await API.getBundle(id)); } catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
   setTitle(b.name);
   const items = b.products || [], reviews = b.reviews || [];
   const avg = reviews.length ? (reviews.reduce((s, r) => s + (+r.rating || 0), 0) / reviews.length).toFixed(1) : null;
@@ -387,10 +390,24 @@ async function viewReservations() {
   $("#app").innerHTML = `<h1 style="margin-bottom:6px">My reservations</h1>
     <p class="muted small" style="margin-bottom:18px">Show the code at the store to pick up your gear.</p><div id="rlist"><p class="muted">Loading…</p></div>`;
   try {
-    const list = await API.listReservations(me.userId);
-    $("#rlist").innerHTML = list && list.length ? `<div class="card pad tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Bundle</th><th>Set</th><th>Dates</th><th>Status</th></tr></thead><tbody>
-      ${list.map(r => `<tr><td><b class="code" title="Full number: ${esc(r.reservationId)}">${esc(resCode(r.reservationId))}</b></td><td>${esc(r.bundleName)}</td><td>${esc(setName(r.setId))}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join("")}
+    // Invoices arrive as messages from the store (customers can't load them from the server directly).
+    const [list, msgs] = await Promise.all([API.listReservations(me.userId), API.myMessages(me.userId).catch(() => [])]);
+    const invoices = InvoiceNote.latest(msgs);
+    $("#rlist").innerHTML = list && list.length ? `<div class="card pad tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Bundle</th><th>Set</th><th>Dates</th><th>Status</th><th>Invoice</th></tr></thead><tbody>
+      ${list.map(r => { const code = resCode(r.reservationId), inv = invoices[code];
+        return `<tr><td><b class="code" title="Full number: ${esc(r.reservationId)}">${esc(code)}</b></td><td>${esc(r.bundleName)}</td><td>${esc(setName(r.setId))}</td><td>${esc(r.startDate)} → ${esc(r.endDate)}</td><td>${statusPill(r.status)}</td>
+          <td>${inv ? `<button type="button" class="btn btn-ghost btn-sm" data-inv="${esc(code)}" aria-expanded="false">${esc(inv.total || "View")} · View</button>`
+            : `<span class="small muted">${String(r.status).toUpperCase() === "RETURNED" ? "On its way" : "After return"}</span>`}</td></tr>
+          ${inv ? `<tr data-inv-row="${esc(code)}" hidden><td colspan="6"><div class="lines" style="max-width:440px">
+            ${inv.lines.map(l => `<div><span>${esc(l.label)}</span><span>${esc(l.amount)}</span></div>`).join("")}
+            <div class="total"><span>Total due</span><span class="price">${esc(inv.total || "")}</span></div>
+            <div class="small muted"><span>Sent by the store on ${esc(inv.sentOn || "")}</span><span>Pay at the store</span></div></div></td></tr>` : ""}`; }).join("")}
       </tbody></table></div>` : `<div class="card empty stack"><p>No reservations yet.</p><div><a class="btn btn-green" href="#browse">Browse bundles</a></div></div>`;
+    $("#rlist").onclick = e => {
+      const b = e.target.closest("[data-inv]"); if (!b) return;
+      const row = $(`[data-inv-row="${b.dataset.inv}"]`);
+      row.hidden = !row.hidden; b.setAttribute("aria-expanded", String(!row.hidden));
+    };
     // Reservations made before codes existed (or whose note didn't send) get their note now, in the background.
     (async () => { for (const r of list || []) await sendCodeNote(r.reservationId, `${r.bundleName}, ${r.startDate} to ${r.endDate}`); })();
   } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
@@ -424,11 +441,13 @@ function linkify(text) {
 async function loadInbox() {
   const box = $("#inbox");
   try {
-    const msgs = await API.myMessages(me.userId);
-    box.innerHTML = msgs && msgs.length ? msgs.map(m => `<div class="inbox-item">
+    // An invoice can come in several parts; show it once, as a pointer to My reservations.
+    const msgs = (await API.myMessages(me.userId) || []).filter(m => { const p = InvoiceNote.parse(m.content); return !p || p.part === 1; });
+    // Invoices can't be deleted here, so My reservations can always show them.
+    box.innerHTML = msgs && msgs.length ? msgs.map(m => { const inv = InvoiceNote.parse(m.content); return `<div class="inbox-item">
       <div class="row between"><b>${esc(m.senderName || "Store")}</b><span class="small muted">${esc(m.dateSent || "")}</span></div>
-      <p>${linkify(m.content)}</p>
-      <div><button type="button" class="btn btn-danger btn-sm" data-del="${esc(m.messageId)}">Delete</button></div></div>`).join("")
+      <p>${inv ? `Your invoice for reservation <b class="code">${esc(inv.code)}</b> is ready. <a href="#reservations">See it under My reservations</a>` : linkify(m.content)}</p>
+      ${inv ? "" : `<div><button type="button" class="btn btn-danger btn-sm" data-del="${esc(m.messageId)}">Delete</button></div>`}</div>`; }).join("")
       : `<p class="empty">No messages from the store yet.</p>`;
     box.onclick = async e => {
       const b = e.target.closest("[data-del]"); if (!b) return;
