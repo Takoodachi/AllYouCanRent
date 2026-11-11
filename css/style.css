@@ -122,6 +122,17 @@ input[type="search"].in{padding-left:38px;background:var(--surface) url("data:im
 .bcard{display:flex;flex-direction:column;text-decoration:none;color:inherit;overflow:hidden;cursor:pointer;border:0;padding:0;text-align:left}
 .bcard:hover{transform:translateY(-2px)}
 .bcard{position:relative}
+/* Favorite heart: a round button over the card photo, and a labelled one on the bundle page */
+.fav{position:absolute;top:10px;right:10px;z-index:2;width:38px;height:38px;border:0;border-radius:999px;display:grid;place-items:center;cursor:pointer;background:rgba(20,26,19,.55);color:#fff;backdrop-filter:blur(4px)}
+.fav:hover{background:rgba(20,26,19,.78)}
+.fav svg,.fav-text svg,.chip-fav svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round}
+.fav svg{width:20px;height:20px}
+.fav[aria-pressed="true"] svg,.fav-text[aria-pressed="true"] svg{fill:#ff5470;stroke:#ff5470}
+.fav-text{display:inline-flex;align-items:center;gap:8px;flex:none;border:1.5px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer}
+.fav-text svg{width:18px;height:18px}
+.fav-text[aria-pressed="true"]{border-color:#ff5470;color:#ff5470}
+.chip-fav svg{width:14px;height:14px}
+.chip-fav.on svg{fill:currentColor}
 .bcard h3 a{color:inherit;text-decoration:none}
 .bcard h3 a::after{content:"";position:absolute;inset:0}
 .more{position:relative;z-index:1;background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--green-ink);cursor:pointer;text-decoration:underline}

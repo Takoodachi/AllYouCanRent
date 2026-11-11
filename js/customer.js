@@ -5,6 +5,45 @@ const APP = "customer";
 let me = Session.get(APP);
 let state = { tag: "", kit: store.get("kit", {}) };  // kit: item name → how many, kept in this browser until sent
 
+/* Favorite bundles (by id). The server has nowhere to keep them, so they're saved in this browser:
+   under the account when logged in, or as a guest until logging in, when they move into the account. */
+const Favs = {
+  key: () => `favs:${me ? me.userId : "guest"}`,
+  list: () => store.get(Favs.key(), []),
+  has: id => Favs.list().includes(id),
+  toggle(id) {
+    const on = !Favs.has(id);
+    store.set(Favs.key(), on ? [...Favs.list(), id] : Favs.list().filter(x => x !== id));
+    return on;
+  },
+  adoptGuest() {
+    const guest = store.get("favs:guest", []);
+    if (!me || !guest.length) return;
+    store.set(Favs.key(), [...new Set([...Favs.list(), ...guest])]);
+    store.set("favs:guest", []);
+  }
+};
+const HEART = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.3-4.4-9.3-8.9C1.3 8.3 3.2 4.5 6.8 4.5c2.1 0 3.5 1.2 5.2 3.1 1.7-1.9 3.1-3.1 5.2-3.1 3.6 0 5.5 3.8 4.1 7.1-2 4.5-9.3 8.9-9.3 8.9z"/></svg>`;
+/* Heart button for a bundle. withText = the labelled version on the bundle page. */
+function favButton(id, withText = false) {
+  const on = Favs.has(id);
+  return `<button type="button" class="${withText ? "fav-text" : "fav"}" data-fav="${esc(id)}" aria-pressed="${on}"
+    aria-label="${on ? "Remove from favorites" : "Add to favorites"}" title="${on ? "Remove from favorites" : "Add to favorites"}">${HEART}${withText ? `<span>${on ? "Favorited" : "Favorite"}</span>` : ""}</button>`;
+}
+/* Make every heart on the page match what's saved (after a click, or after logging in on a page that stays put). */
+function paintFavs() {
+  document.querySelectorAll("[data-fav]").forEach(b => {
+    const on = Favs.has(b.dataset.fav), text = on ? "Remove from favorites" : "Add to favorites";
+    b.setAttribute("aria-pressed", on); b.setAttribute("aria-label", text); b.title = text;
+    if (b.querySelector("span")) b.querySelector("span").textContent = on ? "Favorited" : "Favorite";
+  });
+}
+function toggleFav(btn) {
+  const on = Favs.toggle(btn.dataset.fav);
+  paintFavs();
+  toast(on ? "Added to favorites" : "Removed from favorites");
+}
+
 function drawHeader(h) {
   const links = me ? [["browse", "Browse bundles"], ["kit", "Build a kit"], ["reservations", "My reservations"], ["messages", "Messages"]]
     : [["browse", "Browse bundles"], ["kit", "Build a kit"]];
@@ -67,7 +106,7 @@ function authDialog() {
 }
 const CLOSE_X = `<form method="dialog" class="modal-x"><button aria-label="Close">×</button></form>`;
 function loggedIn(u, msg) {
-  me = u; Session.set(APP, u); toast(msg);
+  me = u; Session.set(APP, u); Favs.adoptGuest(); paintFavs(); toast(msg);
   drawHeader(location.hash.slice(1) || "browse");
   authDialog().close();
 }
@@ -132,31 +171,41 @@ async function viewBrowse() {
       .map(t => `<option value="${esc(t)}">${esc(label(t))} (${uses.get(t)})</option>`).join("");
 
     // Every word of the search must appear in the bundle's name, a tag or an item.
+    const drawChips = () => {
+      const quick = byUse.slice(0, 6);
+      if (state.tag && !quick.includes(state.tag)) quick.push(state.tag);
+      const favCount = full.filter(b => Favs.has(b.bundleId)).length;
+      $("#popular").innerHTML = `<button type="button" class="chip chip-fav ${state.favsOnly ? "on" : ""}" data-favs aria-pressed="${!!state.favsOnly}">${HEART}Favorites (${favCount})</button>
+        <span class="small muted">Popular:</span>` + quick.map(t =>
+        `<button type="button" class="chip ${state.tag === t ? "on" : ""}" data-tag="${esc(t)}" aria-pressed="${state.tag === t}">${esc(label(t))}</button>`).join("");
+    };
     const draw = () => {
       state.q = $("#search").value;
       $("#activity").value = state.tag;
-      const quick = byUse.slice(0, 6);
-      if (state.tag && !quick.includes(state.tag)) quick.push(state.tag);
-      $("#popular").innerHTML = `<span class="small muted">Popular:</span>` + quick.map(t =>
-        `<button type="button" class="chip ${state.tag === t ? "on" : ""}" data-tag="${esc(t)}" aria-pressed="${state.tag === t}">${esc(label(t))}</button>`).join("");
+      drawChips();
       const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
       const shown = full.filter(b => {
         const text = [b.name, ...(b.tags || []), ...(b.products || []).map(p => p.name)].join(" ").toLowerCase();
-        return (!state.tag || (b.tags || []).includes(state.tag)) && words.every(w => text.includes(w));
+        return (!state.favsOnly || Favs.has(b.bundleId)) && (!state.tag || (b.tags || []).includes(state.tag)) && words.every(w => text.includes(w));
       });
       $("#count").textContent = `${shown.length} of ${full.length} bundles`;
       $("#list").innerHTML = shown.length ? `<div class="cards">${shown.map(bundleCard).join("")}</div>`
-        : `<div class="card empty">No bundles match your search. <button type="button" class="more" data-clear>Clear filters</button></div>`;
+        : state.favsOnly && !full.some(b => Favs.has(b.bundleId))
+          ? `<div class="card empty">No favorites yet. Tap the heart on any bundle to save it here. <button type="button" class="more" data-clear>Show all bundles</button></div>`
+          : `<div class="card empty">No bundles match your search. <button type="button" class="more" data-clear>Clear filters</button></div>`;
     };
     $("#search").oninput = draw;
     $("#activity").onchange = e => { state.tag = e.target.value; draw(); };
     $("#popular").onclick = e => {
+      if (e.target.closest("[data-favs]")) { state.favsOnly = !state.favsOnly; return draw(); }
       const b = e.target.closest("[data-tag]"); if (!b) return;
       state.tag = state.tag === b.dataset.tag ? "" : b.dataset.tag;  // clicking the active one clears it
       draw();
     };
     $("#list").onclick = e => {
-      if (e.target.closest("[data-clear]")) { state.tag = ""; $("#search").value = ""; return draw(); }
+      const fav = e.target.closest("[data-fav]");
+      if (fav) { toggleFav(fav); return state.favsOnly ? draw() : drawChips(); }
+      if (e.target.closest("[data-clear]")) { state.tag = ""; state.favsOnly = false; $("#search").value = ""; return draw(); }
       const btn = e.target.closest("[data-more]"); if (!btn) return;
       const open = btn.textContent === "See more";
       btn.previousElementSibling.hidden = !open; btn.previousElementSibling.previousElementSibling.hidden = open;
@@ -169,7 +218,7 @@ async function viewBrowse() {
 
 function bundleCard(b) {
   const n = (b.reviews || []).length, avg = n ? (b.reviews.reduce((s, r) => s + (+r.rating || 0), 0) / n).toFixed(1) : null;
-  return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div><div class="body">
+  return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div>${favButton(b.bundleId)}<div class="body">
     <h3><a href="#bundle-${encodeURIComponent(b.bundleId)}">${esc(b.name)}</a></h3>
     <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
     <p class="small muted">${seeMore(itemSummary(b))}</p>
@@ -287,7 +336,7 @@ async function viewBundle(id) {
     <div class="stack">
       <div class="art-lg">${bundleImage(b, b.bundleId, true)}</div>
       <div class="card pad stack">
-        <h1>${esc(b.name)}</h1>
+        <div class="row between" style="align-items:center"><h1>${esc(b.name)}</h1>${favButton(b.bundleId, true)}</div>
         <div class="row between">${b.dailyCharge != null ? `<span><span class="price" style="font-size:1.5rem">${money(b.dailyCharge)}</span> <span class="muted">/ day</span></span>` : ""}
           <span>${avg ? `<span class="stars">★</span> <b>${avg}</b> <span class="muted">(${reviews.length} review${reviews.length > 1 ? "s" : ""})</span>` : `<span class="muted small">No reviews yet</span>`}</span></div>
         <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
@@ -326,6 +375,7 @@ async function viewBundle(id) {
   </div>`;
 
   linkDates($("#av-start"), $("#av-end"));
+  $("#app .fav-text").onclick = e => toggleFav(e.currentTarget);
   if ($("#review-login")) $("#review-login").onclick = () => needLogin(() => viewBundle(id));
   onSubmit($("#review-form"), async d => {
     try {
