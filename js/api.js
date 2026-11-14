@@ -30,7 +30,8 @@ const API = (() => {
     let data = text;
     try { data = text ? JSON.parse(text) : null; } catch (e) { /* plain-text reply */ }
     if (!res.ok) {
-      const why = (data && typeof data === "object" && (data.message || data.error)) || (typeof data === "string" && data) || res.statusText;
+      // Some errors are just {"id":"Invalid"}, and HTTP/2 has no status text, hence the last fallback.
+      const why = (data && typeof data === "object" && (data.message || data.error)) || (typeof data === "string" && data) || res.statusText || "The server turned this down";
       throw Object.assign(new Error(`${why} (HTTP ${res.status})`), { status: res.status });
     }
     return data;
@@ -99,6 +100,23 @@ const API = (() => {
       post("/reservations/lostitem", { userId: employeeId, reservationId, itemId }),
     // → {reservationId, customerId, customerName, setId, bundleName, startDate, endDate, charges:[{type, description, amount}], total}
     invoice: (employeeId, reservationId) => get("/reservations/invoice" + q({ userId: employeeId, reservationId })),
+
+    /* ---------- favorites ---------- (bundle ids) */
+    listFavorites: userId => get(`/users/${encodeURIComponent(userId)}/favorites`),  // → ["bundleId", ...]
+    addFavorite: (userId, bundleId) => post(`/users/${encodeURIComponent(userId)}/favorites`, { bundleId }),
+    removeFavorite: (userId, bundleId) => del(`/users/${encodeURIComponent(userId)}/favorites/${encodeURIComponent(bundleId)}`),
+
+    /* ---------- trips ---------- (TripDTO: tripId, userId, tripName, startDate, endDate, groupSize, notes,
+       bundles: [bundleId], reservations: [reservationId]) */
+    listTrips: userId => get(`/users/${encodeURIComponent(userId)}/trips`),          // → ["tripId", ...]
+    createTrip: (userId, { tripName, startDate, endDate, groupSize, notes }) =>       // → {id}
+      post(`/users/${encodeURIComponent(userId)}/trips`, { tripName, startDate, endDate, groupSize, notes }),
+    getTrip: tripId => get(`/trips/${encodeURIComponent(tripId)}`)
+      .then(t => ({ ...t, bundles: t.bundles || [], reservations: t.reservations || [] })),
+    deleteTrip: (userId, tripId) => del(`/users/${encodeURIComponent(userId)}/trips/${encodeURIComponent(tripId)}`),
+    addTripBundle: (tripId, bundleId) => post(`/trips/${encodeURIComponent(tripId)}/bundles`, { bundleId }),
+    removeTripBundle: (tripId, bundleId) => del(`/trips/${encodeURIComponent(tripId)}/bundles/${encodeURIComponent(bundleId)}`),
+    addTripReservation: (tripId, reservationId) => post(`/trips/${encodeURIComponent(tripId)}/reservations`, { reservationId }),
 
     /* ---------- reviews ---------- */
     postReview: (customerId, { bundleId, rating, content }) =>

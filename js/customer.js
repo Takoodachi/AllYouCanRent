@@ -1,14 +1,69 @@
-/* customer.js — browse bundles, reserve, review, message the store.
+/* customer.js — browse bundles, favorites, trips, reserve, review, message the store.
    Anyone can browse. A log-in pop-up opens only for things that need an account. */
 
 const APP = "customer";
 let me = Session.get(APP);
 let state = { tag: "", kit: store.get("kit", {}) };  // kit: item name → how many, kept in this browser until sent
 
+/* Favorite bundles (ids), saved on the server for each account. They're loaded once per log-in and
+   kept here, so hearts draw without waiting. A guest who taps a heart logs in first. */
+const Favs = {
+  ids: new Set(), owner: null, ready: Promise.resolve(), busy: new Set(),
+  // Loads the logged-in customer's favorites, once per account. Never fails: on an error the hearts
+  // show empty and the next page tries again.
+  load() {
+    if (!me) { Favs.ids = new Set(); Favs.owner = null; return Promise.resolve(); }
+    if (Favs.owner !== me.userId) {
+      Favs.owner = me.userId;
+      Favs.ready = API.listFavorites(me.userId).then(ids => { Favs.ids = new Set(ids || []); }, () => { Favs.owner = null; });
+    }
+    return Favs.ready;
+  },
+  has: id => Favs.ids.has(id)
+};
+const HEART = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.3-4.4-9.3-8.9C1.3 8.3 3.2 4.5 6.8 4.5c2.1 0 3.5 1.2 5.2 3.1 1.7-1.9 3.1-3.1 5.2-3.1 3.6 0 5.5 3.8 4.1 7.1-2 4.5-9.3 8.9-9.3 8.9z"/></svg>`;
+/* Heart button for a bundle. withText = the labelled version on the bundle page. */
+function favButton(id, withText = false) {
+  const on = Favs.has(id);
+  return `<button type="button" class="${withText ? "fav-text" : "fav"}" data-fav="${esc(id)}" aria-pressed="${on}"
+    aria-label="${on ? "Remove from favorites" : "Add to favorites"}" title="${on ? "Remove from favorites" : "Add to favorites"}">${HEART}${withText ? `<span>${on ? "Favorited" : "Favorite"}</span>` : ""}</button>`;
+}
+/* Make every heart on the page match what's saved (after a click, or after logging in on a page that stays put). */
+function paintFavs() {
+  document.querySelectorAll("[data-fav]").forEach(b => {
+    const on = Favs.has(b.dataset.fav), text = on ? "Remove from favorites" : "Add to favorites";
+    b.setAttribute("aria-pressed", on); b.setAttribute("aria-label", text); b.title = text;
+    if (b.querySelector("span")) b.querySelector("span").textContent = on ? "Favorited" : "Favorite";
+  });
+}
+/* Heart click: save or unsave the bundle on the server. A guest logs in first, then it's saved.
+   Settles when done, so a page can redraw after it. */
+async function toggleFav(btn) {
+  const id = btn.dataset.fav;
+  if (!me) {
+    if (!await new Promise(res => needLogin(() => res(true), () => res(false)))) return;
+    await Favs.load();
+    if (Favs.has(id)) return paintFavs();  // the account already has it
+  }
+  if (Favs.busy.has(id)) return;
+  const on = !Favs.has(id);
+  Favs.busy.add(id);
+  on ? Favs.ids.add(id) : Favs.ids.delete(id);  // show it right away; put it back if the server says no
+  paintFavs();
+  try {
+    // Removing one that isn't saved (say, removed in another tab) is HTTP 404: it's gone either way.
+    await (on ? API.addFavorite(me.userId, id) : API.removeFavorite(me.userId, id).catch(e => { if (e.status !== 404) throw e; }));
+    toast(on ? "Added to favorites" : "Removed from favorites");
+  } catch (e) {
+    on ? Favs.ids.delete(id) : Favs.ids.add(id);
+    paintFavs(); toast("Couldn't save that. " + e.message);
+  } finally { Favs.busy.delete(id); }
+}
+
 function drawHeader(h) {
-  const links = me ? [["browse", "Browse bundles"], ["kit", "Build a kit"], ["reservations", "My reservations"], ["messages", "Messages"]]
+  const links = me ? [["browse", "Browse bundles"], ["kit", "Build a kit"], ["trips", "My trips"], ["reservations", "My reservations"], ["messages", "Messages"]]
     : [["browse", "Browse bundles"], ["kit", "Build a kit"]];
-  renderHeader("Customer", links, h.split("-")[0], me, () => { Session.clear(APP); me = null; go("browse"); });
+  renderHeader("Customer", links, h.startsWith("trip-") ? "trips" : h.split("-")[0], me, () => { Session.clear(APP); me = null; go("browse"); });
   if (!me) {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = "Log in"; b.onclick = () => needLogin(route);
@@ -24,13 +79,14 @@ function route() {
     if (h !== "browse") scrollTo(0, 0);
     page = h;
   }
-  setTitle({ browse: "Browse bundles", kit: "Build a kit", reservations: "My reservations", messages: "Messages" }[h]);
+  setTitle({ browse: "Browse bundles", kit: "Build a kit", trips: "My trips", reservations: "My reservations", messages: "Messages" }[h]);
   drawHeader(h);
   if (h.startsWith("bundle-")) return viewBundle(decodeURIComponent(h.slice(7)));
   if (h === "kit") return viewKit();
-  if (h === "reservations" || h === "messages") {
+  const mine = { trips: viewTrips, reservations: viewReservations, messages: viewMessages };  // pages that need a log-in
+  if (mine[h] || h.startsWith("trip-")) {
     if (!me) { viewBrowse(); return needLogin(route, () => go("browse")); }
-    return h === "reservations" ? viewReservations() : viewMessages();
+    return h.startsWith("trip-") ? viewTrip(decodeURIComponent(h.slice(5))) : mine[h]();
   }
   return viewBrowse();
 }
@@ -67,7 +123,7 @@ function authDialog() {
 }
 const CLOSE_X = `<form method="dialog" class="modal-x"><button aria-label="Close">×</button></form>`;
 function loggedIn(u, msg) {
-  me = u; Session.set(APP, u); toast(msg);
+  me = u; Session.set(APP, u); Favs.load().then(paintFavs); toast(msg);
   drawHeader(location.hash.slice(1) || "browse");
   authDialog().close();
 }
@@ -120,8 +176,10 @@ async function viewBrowse() {
       <div class="row between"><div class="row" id="popular"></div><span class="small muted" id="count"></span></div>
     </div>
     <div id="list"><p class="muted">Loading bundles…</p></div>`;
+  if (!me) state.favsOnly = false;
   try {
-    const full = (await loadBundles()).filter(b => !isCustomKit(b));
+    const [all] = await Promise.all([loadBundles(), Favs.load()]);
+    const full = all.filter(b => !isCustomKit(b));
     if (!full.length) { $("#list").innerHTML = `<div class="card empty">No bundles yet.</div>`; return; }
     // Activities come from the bundles on show, so every choice has results. Most used first.
     const uses = new Map();
@@ -132,31 +190,44 @@ async function viewBrowse() {
       .map(t => `<option value="${esc(t)}">${esc(label(t))} (${uses.get(t)})</option>`).join("");
 
     // Every word of the search must appear in the bundle's name, a tag or an item.
+    const drawChips = () => {
+      const quick = byUse.slice(0, 6);
+      if (state.tag && !quick.includes(state.tag)) quick.push(state.tag);
+      const favCount = me ? ` (${full.filter(b => Favs.has(b.bundleId)).length})` : "";
+      $("#popular").innerHTML = `<button type="button" class="chip chip-fav ${state.favsOnly ? "on" : ""}" data-favs aria-pressed="${!!state.favsOnly}">${HEART}Favorites${favCount}</button>
+        <span class="small muted">Popular:</span>` + quick.map(t =>
+        `<button type="button" class="chip ${state.tag === t ? "on" : ""}" data-tag="${esc(t)}" aria-pressed="${state.tag === t}">${esc(label(t))}</button>`).join("");
+    };
     const draw = () => {
       state.q = $("#search").value;
       $("#activity").value = state.tag;
-      const quick = byUse.slice(0, 6);
-      if (state.tag && !quick.includes(state.tag)) quick.push(state.tag);
-      $("#popular").innerHTML = `<span class="small muted">Popular:</span>` + quick.map(t =>
-        `<button type="button" class="chip ${state.tag === t ? "on" : ""}" data-tag="${esc(t)}" aria-pressed="${state.tag === t}">${esc(label(t))}</button>`).join("");
+      drawChips();
       const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
       const shown = full.filter(b => {
         const text = [b.name, ...(b.tags || []), ...(b.products || []).map(p => p.name)].join(" ").toLowerCase();
-        return (!state.tag || (b.tags || []).includes(state.tag)) && words.every(w => text.includes(w));
+        return (!state.favsOnly || Favs.has(b.bundleId)) && (!state.tag || (b.tags || []).includes(state.tag)) && words.every(w => text.includes(w));
       });
       $("#count").textContent = `${shown.length} of ${full.length} bundles`;
       $("#list").innerHTML = shown.length ? `<div class="cards">${shown.map(bundleCard).join("")}</div>`
-        : `<div class="card empty">No bundles match your search. <button type="button" class="more" data-clear>Clear filters</button></div>`;
+        : state.favsOnly && !full.some(b => Favs.has(b.bundleId))
+          ? `<div class="card empty">No favorites yet. Tap the heart on any bundle to save it here. <button type="button" class="more" data-clear>Show all bundles</button></div>`
+          : `<div class="card empty">No bundles match your search. <button type="button" class="more" data-clear>Clear filters</button></div>`;
     };
     $("#search").oninput = draw;
     $("#activity").onchange = e => { state.tag = e.target.value; draw(); };
     $("#popular").onclick = e => {
+      if (e.target.closest("[data-favs]")) {
+        if (!me) return needLogin(() => Favs.load().then(() => { state.favsOnly = true; draw(); }));
+        state.favsOnly = !state.favsOnly; return draw();
+      }
       const b = e.target.closest("[data-tag]"); if (!b) return;
       state.tag = state.tag === b.dataset.tag ? "" : b.dataset.tag;  // clicking the active one clears it
       draw();
     };
     $("#list").onclick = e => {
-      if (e.target.closest("[data-clear]")) { state.tag = ""; $("#search").value = ""; return draw(); }
+      const fav = e.target.closest("[data-fav]");
+      if (fav) return toggleFav(fav).then(() => state.favsOnly ? draw() : drawChips());
+      if (e.target.closest("[data-clear]")) { state.tag = ""; state.favsOnly = false; $("#search").value = ""; return draw(); }
       const btn = e.target.closest("[data-more]"); if (!btn) return;
       const open = btn.textContent === "See more";
       btn.previousElementSibling.hidden = !open; btn.previousElementSibling.previousElementSibling.hidden = open;
@@ -169,7 +240,7 @@ async function viewBrowse() {
 
 function bundleCard(b) {
   const n = (b.reviews || []).length, avg = n ? (b.reviews.reduce((s, r) => s + (+r.rating || 0), 0) / n).toFixed(1) : null;
-  return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div><div class="body">
+  return `<div class="card bcard"><div class="art">${bundleImage(b, b.bundleId)}</div>${favButton(b.bundleId)}<div class="body">
     <h3><a href="#bundle-${encodeURIComponent(b.bundleId)}">${esc(b.name)}</a></h3>
     <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
     <p class="small muted">${seeMore(itemSummary(b))}</p>
@@ -276,7 +347,8 @@ async function viewKit() {
 async function viewBundle(id) {
   $("#app").innerHTML = `<p class="muted">Loading bundle…</p>`;
   let b;
-  try { b = withSamples(await API.getBundle(id)); } catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+  try { [b] = await Promise.all([API.getBundle(id).then(withSamples), Favs.load()]); }
+  catch (e) { $("#app").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
   setTitle(b.name);
   const items = b.products || [], reviews = b.reviews || [];
   const avg = reviews.length ? (reviews.reduce((s, r) => s + (+r.rating || 0), 0) / reviews.length).toFixed(1) : null;
@@ -287,7 +359,7 @@ async function viewBundle(id) {
     <div class="stack">
       <div class="art-lg">${bundleImage(b, b.bundleId, true)}</div>
       <div class="card pad stack">
-        <h1>${esc(b.name)}</h1>
+        <div class="row between" style="align-items:center"><h1>${esc(b.name)}</h1>${favButton(b.bundleId, true)}</div>
         <div class="row between">${b.dailyCharge != null ? `<span><span class="price" style="font-size:1.5rem">${money(b.dailyCharge)}</span> <span class="muted">/ day</span></span>` : ""}
           <span>${avg ? `<span class="stars">★</span> <b>${avg}</b> <span class="muted">(${reviews.length} review${reviews.length > 1 ? "s" : ""})</span>` : `<span class="muted small">No reviews yet</span>`}</span></div>
         <div class="tagline">${(b.tags || []).map(t => `<span>#${esc(t)}</span>`).join("")}</div>
@@ -322,10 +394,13 @@ async function viewBundle(id) {
         <button class="btn btn-green btn-block" type="submit">See available sets</button>
       </form>
       <div id="sets"></div>
+      <div class="card pad stack" id="trip-box"></div>
     </div>
   </div>`;
 
   linkDates($("#av-start"), $("#av-end"));
+  $("#app .fav-text").onclick = e => toggleFav(e.currentTarget);
+  drawTripBox(b);
   if ($("#review-login")) $("#review-login").onclick = () => needLogin(() => viewBundle(id));
   onSubmit($("#review-form"), async d => {
     try {
@@ -342,7 +417,7 @@ async function viewBundle(id) {
     const sets = await API.availableSets(b.bundleId, d.startDate, d.endDate);
     const box = $("#sets");
     if (!sets || !sets.length) { box.innerHTML = `<div class="card pad empty">No sets are free from ${esc(d.startDate)} to ${esc(d.endDate)}. Try other dates.</div>`; return; }
-    const nDays = Math.max(1, Math.round((Date.parse(d.endDate) - Date.parse(d.startDate)) / 864e5));
+    const nDays = daysBetween(d.startDate, d.endDate);
     box.innerHTML = `<div class="card pad stack"><h3>${sets.length} set${sets.length > 1 ? "s" : ""} available</h3>
       ${sets.map((s, i) => `<div class="row between" style="border-top:${i ? "1px solid var(--line)" : "0"};padding-top:${i ? "12px" : "0"}">
         <div><b>${esc(setName(s.setId))}</b><br><span class="small muted">${s.dailyCharge != null ? `${money(s.dailyCharge)} × ${nDays} day${nDays > 1 ? "s" : ""}` : ""}${s.cleaningFee != null ? ` + ${money(s.cleaningFee)} cleaning fee` : ""}</span></div>
@@ -411,6 +486,227 @@ async function viewReservations() {
     // Reservations made before codes existed (or whose note didn't send) get their note now, in the background.
     (async () => { for (const r of list || []) await sendCodeNote(r.reservationId, `${r.bundleName}, ${r.startDate} to ${r.endDate}`); })();
   } catch (e) { $("#rlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+/* ---------- trips ---------- */
+/* A trip is a name, dates and a list of bundles, saved on the server. Customers add bundles while
+   planning, then reserve them all at once; after that the list doesn't change. The server only keeps
+   the lists, so the shop does the reserving: it checks that every bundle has a free set for the
+   dates, then reserves each one and adds the reservation to the trip. */
+const daysBetween = (start, end) => Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 864e5));
+const plural = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+const tripDates = t => `${esc(t.startDate)} → ${esc(t.endDate)} (${plural(daysBetween(t.startDate, t.endDate), "day")})`;
+function tripPill(t) {
+  const nr = t.reservations.length, nb = t.bundles.length;
+  if (nr) return nr < nb ? `<span class="pill warn">Partly reserved</span>` : `<span class="pill">Reserved</span>`;
+  return t.startDate < today() ? `<span class="pill done">Dates passed</span>` : `<span class="pill warn">Planning</span>`;
+}
+/* The customer's trips, soonest first. */
+async function loadTrips() {
+  const trips = await Promise.all((await API.listTrips(me.userId) || []).map(id => API.getTrip(id).catch(() => null)));
+  return trips.filter(t => t && t.tripId).sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
+}
+
+async function viewTrips() {
+  const add = state.addToTrip; state.addToTrip = null;  // a bundle for the new trip, from "Plan a new trip" on a bundle page
+  $("#app").innerHTML = `<h1 style="margin-bottom:6px">My trips</h1>
+    <p class="muted small" style="margin-bottom:18px">Gather the bundles you need for a trip, then reserve them all at once.</p>
+    <div class="side-col">
+      <div id="tlist"><p class="muted">Loading…</p></div>
+      <form class="card pad stack" id="trip-form">
+        <h2>Plan a trip</h2>
+        ${add ? `<p class="msg info">${esc(add.name)} will be added to this trip.</p>` : ""}
+        <label class="f">Trip name<input class="in" name="tripName" id="tr-name" required maxlength="80" placeholder="Lake weekend"></label>
+        <div class="grid-2">
+          <label class="f">Start date<input class="in" type="date" name="startDate" id="tr-start" value="${addDays(today(), 14)}" min="${today()}" required></label>
+          <label class="f">End date<input class="in" type="date" name="endDate" id="tr-end" value="${addDays(today(), 16)}" min="${today()}" required></label>
+        </div>
+        <label class="f">Group size<input class="in" type="number" name="groupSize" min="1" max="99" value="2" required></label>
+        <label class="f">Notes (optional)<textarea class="in" name="notes" rows="2" maxlength="255" placeholder="Where you're going, pickup time, anything to remember"></textarea></label>
+        <div data-msg hidden></div>
+        <button class="btn btn-green" type="submit">Create trip</button>
+      </form>
+    </div>`;
+  linkDates($("#tr-start"), $("#tr-end"));
+  if (add) $("#tr-name").focus();
+  onSubmit($("#trip-form"), async d => {
+    const { id } = await API.createTrip(me.userId, { tripName: d.tripName.trim(), startDate: d.startDate, endDate: d.endDate,
+      groupSize: +d.groupSize, notes: d.notes.trim() });
+    if (add) await API.addTripBundle(id, add.id);
+    toast("Trip created"); go("trip-" + id);
+  });
+  try {
+    const trips = await loadTrips();
+    $("#tlist").innerHTML = trips.length ? `<div class="stack">${trips.map(t => `<a class="card pad trip-card" href="#trip-${encodeURIComponent(t.tripId)}">
+        <div class="row between"><h3>${esc(t.tripName || "Trip")}</h3>${tripPill(t)}</div>
+        <span class="small muted">${tripDates(t)} · ${plural(+t.groupSize || 1, "person", "people")} · ${plural(t.bundles.length, "bundle")}</span></a>`).join("")}</div>`
+      : `<div class="card empty">No trips yet. Plan one here, then add bundles to it from any bundle page.</div>`;
+  } catch (e) { $("#tlist").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+/* One trip. note = [kind, text] to show above the reserve button. */
+async function viewTrip(tid, note) {
+  $("#app").innerHTML = `<p class="muted">Loading trip…</p>`;
+  let t, bundles, mine;
+  try {
+    t = await API.getTrip(tid);
+    if (String(t.userId) !== String(me.userId)) throw Object.assign(new Error("Trip not found"), { status: 404 });  // only your own trips
+    [bundles, mine] = await Promise.all([
+      Promise.all(t.bundles.map(id => API.getBundle(id).catch(() => ({ bundleId: id, name: "A bundle we no longer offer" })))),
+      t.reservations.length ? API.listReservations(me.userId) : []]);
+  } catch (e) {
+    $("#app").innerHTML = e.status === 404 ? `<div class="card empty stack"><p>This trip doesn't exist anymore.</p><div><a class="btn btn-green" href="#trips">My trips</a></div></div>`
+      : `<div class="msg err">${esc(e.message)}</div>`;
+    return;
+  }
+  setTitle(t.tripName);
+  const nDays = daysBetween(t.startDate, t.endDate), planning = !t.reservations.length;
+  const booked = mine.filter(r => t.reservations.includes(r.reservationId));
+  const left = [...bundles];  // bundles still to reserve: each reservation covers one bundle with its name
+  booked.forEach(r => { const i = left.findIndex(b => b.name === r.bundleName); if (i >= 0) left.splice(i, 1); });
+  const canReserve = left.length > 0 && t.startDate >= today();
+  const total = bundles.reduce((s, b) => s + (+b.dailyCharge || 0) * nDays, 0);
+
+  $("#app").innerHTML = `<a href="#trips" class="small">← My trips</a>
+  <div class="side-col" style="margin-top:12px">
+    <div class="stack">
+      <div class="card pad stack">
+        <div class="row between"><h1>${esc(t.tripName || "Trip")}</h1>${tripPill(t)}</div>
+        <p>${tripDates(t)} · ${plural(+t.groupSize || 1, "person", "people")}</p>
+        ${t.notes ? `<p class="small muted" style="white-space:pre-line">${esc(t.notes)}</p>` : ""}
+      </div>
+      <div class="card pad stack" id="trip-bundles"><h2>Bundles</h2>
+        ${bundles.length ? bundles.map(b => `<div class="trip-row"><div class="thumb">${bundleImage(b, b.bundleId)}</div>
+            <div><a href="#bundle-${encodeURIComponent(b.bundleId)}"><b>${esc(b.name)}</b></a><br>
+              <span class="small muted">${b.dailyCharge != null ? `${money(b.dailyCharge)} / day` : ""}</span></div>
+            ${planning ? `<button type="button" class="btn btn-quiet btn-sm" data-remove="${esc(b.bundleId)}">Remove</button>` : ""}</div>`).join("")
+          : `<p class="muted small">No bundles yet. Open a bundle and use “Add to a trip”.</p><div><a class="btn btn-ghost btn-sm" href="#browse">Browse bundles</a></div>`}
+      </div>
+      ${booked.length ? `<div class="card pad stack"><h2>Reservations</h2>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Bundle</th><th>Set</th><th>Status</th></tr></thead><tbody>
+        ${booked.map(r => `<tr><td><b class="code">${esc(resCode(r.reservationId))}</b></td><td>${esc(r.bundleName)}</td><td>${esc(setName(r.setId))}</td><td>${statusPill(r.status)}</td></tr>`).join("")}
+        </tbody></table></div><p class="small muted">Show the codes at the store to pick up your gear.</p></div>` : ""}
+    </div>
+    <div class="stack">
+      <div class="card pad stack">
+        <h2>Estimated cost</h2>
+        ${bundles.length ? `<div class="lines">${bundles.map(b => `<div><span>${esc(b.name)}</span><span>${money((+b.dailyCharge || 0) * nDays)}</span></div>`).join("")}
+          <div class="total"><span>${plural(nDays, "day")}</span><span class="price">${money(total)}</span></div></div>
+          <p class="small muted">Plus each set's cleaning fee. You pay at the store when you return the gear.</p>` : `<p class="small muted">Add bundles to see the cost.</p>`}
+        <div id="trip-msg" hidden></div>
+        ${canReserve ? `<button type="button" class="btn btn-orange btn-block" id="trip-reserve">${left.length === 1 ? (booked.length ? "Reserve the last bundle" : "Reserve this bundle")
+          : `Reserve ${booked.length ? "the remaining" : "all"} ${left.length} bundles`}</button>`
+          : booked.length && !left.length ? `<p class="msg ok">Every bundle is reserved. Have a great trip!</p>` : ""}
+      </div>
+      <div id="trip-fix"></div>
+      ${planning ? `<div><button type="button" class="btn btn-danger" id="trip-del">Delete trip</button></div>` : ""}
+    </div>
+  </div>`;
+  if (note) say($("#trip-msg"), ...note);
+
+  $("#trip-bundles").onclick = async e => {
+    const btn = e.target.closest("[data-remove]"); if (!btn) return;
+    btn.disabled = true;
+    try { await API.removeTripBundle(t.tripId, btn.dataset.remove); toast("Removed from the trip"); viewTrip(t.tripId); }
+    catch (err) { toast(err.message); btn.disabled = false; }
+  };
+  if ($("#trip-del")) $("#trip-del").onclick = async e => {
+    const btn = e.currentTarget;
+    if (!confirm(`Delete the trip "${t.tripName}"?`)) return;
+    btn.disabled = true;
+    try { await API.deleteTrip(me.userId, t.tripId); toast("Trip deleted"); go("trips"); }
+    catch (err) { toast(err.message); btn.disabled = false; }
+  };
+
+  // New dates: the server can't change a trip's dates, so the trip moves to a new one (see moveTrip)
+  // and the shop tries reserving again there.
+  const newDates = (title, text) => {
+    const start = addDays(t.startDate < today() ? today() : t.startDate, 7);
+    $("#trip-fix").innerHTML = `<form class="card pad stack" id="redate-form" style="border:2px solid var(--orange)">
+      <h3>${esc(title)}</h3><p class="small">${esc(text)}</p>
+      <div class="grid-2">
+        <label class="f">Start date<input class="in" type="date" name="startDate" id="rd-start" value="${start}" min="${today()}" required></label>
+        <label class="f">End date<input class="in" type="date" name="endDate" id="rd-end" value="${addDays(start, nDays)}" min="${today()}" required></label>
+      </div>
+      <div data-msg hidden></div>
+      <button class="btn btn-orange" type="submit">Try these dates</button></form>`;
+    linkDates($("#rd-start"), $("#rd-end"));
+    onSubmit($("#redate-form"), async d => {
+      const id = await moveTrip(t, d.startDate, d.endDate);
+      state.autoReserve = id; go("trip-" + id);
+    });
+    $("#rd-start").focus();
+  };
+  // Nothing is reserved unless every bundle has a free set for the dates.
+  const reserveAll = async () => {
+    const btn = $("#trip-reserve"), msg = $("#trip-msg");
+    btn.disabled = true; $("#trip-fix").innerHTML = "";
+    say(msg, "info", "Checking that every bundle has a free set…");
+    let done = 0;
+    try {
+      // The server keeps each bundle once per trip, so each needs one free set.
+      const free = await Promise.all(left.map(b => API.availableSets(b.bundleId, t.startDate, t.endDate).then(s => s || [])));
+      const short = left.filter((b, i) => !free[i].length);
+      if (short.length) {
+        msg.hidden = true; btn.disabled = false;
+        return newDates("Not available for these dates", `No free set from ${t.startDate} to ${t.endDate} for: ${short.map(b => b.name).join(", ")}. ` +
+          `Pick new dates and the shop will try again, or remove ${short.length > 1 ? "those bundles" : "that bundle"} and reserve the rest.`);
+      }
+      for (const [i, b] of left.entries()) {
+        say(msg, "info", `Reserving ${b.name} (${i + 1} of ${left.length})…`);
+        const r = await API.reserve(me.userId, { setId: free[i][0].setId, startDate: t.startDate, endDate: t.endDate });
+        // One retry: the set is already reserved, so it must end up on the trip.
+        await API.addTripReservation(t.tripId, r.id).catch(() => API.addTripReservation(t.tripId, r.id)).catch(e => {
+          throw new Error(`${b.name} was reserved (code ${resCode(r.id)}, under My reservations) but couldn't be added to this trip: ${e.message}`); });
+        await sendCodeNote(r.id, `${b.name}, ${t.startDate} to ${t.endDate}, trip: ${t.tripName}`);
+        done++;
+      }
+      toast("Trip reserved"); viewTrip(t.tripId);
+    } catch (e) {
+      if (!done) { say(msg, "err", e.message); btn.disabled = false; return; }
+      viewTrip(t.tripId, ["err", `Reserved ${done} of ${left.length}. Then: ${e.message}`]);
+    }
+  };
+  if (canReserve) $("#trip-reserve").onclick = reserveAll;
+  if (planning && bundles.length && t.startDate < today()) newDates("These dates have passed", "Pick new dates to reserve this trip.");
+  if (state.autoReserve === t.tripId) { state.autoReserve = null; if (canReserve) reserveAll(); }
+}
+
+/* The server can't change a trip's dates. So: a new trip with the new dates, the same details and
+   the same bundles, then the old trip is deleted. → the new trip's id */
+async function moveTrip(t, startDate, endDate) {
+  const { id } = await API.createTrip(me.userId, { tripName: t.tripName, startDate, endDate, groupSize: t.groupSize, notes: t.notes || "" });
+  try { for (const b of t.bundles) await API.addTripBundle(id, b); }
+  catch (e) { await API.deleteTrip(me.userId, id).catch(() => {}); throw e; }  // no half-copied trip left behind
+  await API.deleteTrip(me.userId, t.tripId).catch(() => {});  // if this fails, the old copy stays in the list; nothing is lost
+  return id;
+}
+
+/* "Add to a trip" box on a bundle page: pick one of the customer's trips that's still being planned. */
+async function drawTripBox(b) {
+  const box = $("#trip-box");
+  const head = `<h2>Add to a trip</h2><p class="small muted">Gather the bundles for a trip, then reserve them all at once.</p>`;
+  if (!me) {
+    box.innerHTML = head + `<div><button type="button" class="btn btn-ghost" id="trip-login">Log in to plan a trip</button></div>`;
+    $("#trip-login").onclick = () => me ? drawTripBox(b) : needLogin(() => drawTripBox(b));
+    return;
+  }
+  box.innerHTML = head + `<p class="small muted">Loading your trips…</p>`;
+  let trips;
+  try { trips = (await loadTrips()).filter(t => !t.reservations.length && t.startDate >= today()); }
+  catch (e) { box.innerHTML = head + `<div class="msg err">${esc(e.message)}</div>`; return; }
+  if (!box.isConnected) return;  // moved on to another page meanwhile
+  box.innerHTML = head + (trips.length ? `<form class="stack" id="trip-add">
+      <label class="f">Trip<select class="in" name="tripId">${trips.map(t => `<option value="${esc(t.tripId)}">${esc(t.tripName)}, ${esc(t.startDate)} → ${esc(t.endDate)}${t.bundles.includes(b.bundleId) ? " (has this bundle)" : ""}</option>`).join("")}</select></label>
+      <div id="trip-added"></div>
+      <div class="row"><button class="btn btn-green" type="submit">Add to trip</button><button type="button" class="more" id="trip-new">Plan a new trip</button></div>
+    </form>` : `<div><button type="button" class="btn btn-ghost" id="trip-new">Plan a new trip</button></div>`);
+  $("#trip-new").onclick = () => { state.addToTrip = { id: b.bundleId, name: b.name }; go("trips"); };
+  onSubmit($("#trip-add"), async d => {
+    const t = trips.find(x => x.tripId === d.tripId), had = t.bundles.includes(b.bundleId);  // a trip holds a bundle once
+    if (!had) { await API.addTripBundle(t.tripId, b.bundleId); t.bundles.push(b.bundleId); }
+    $("#trip-added").innerHTML = `<p class="msg ok">${had ? "It's already in" : "Added to"} ${esc(t.tripName)}. <a href="#trip-${encodeURIComponent(t.tripId)}">View trip</a></p>`;
+  });
 }
 
 /* ---------- messages ---------- */

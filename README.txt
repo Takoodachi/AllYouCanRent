@@ -49,6 +49,16 @@ NOTES
     (the server only accepts reviews from customers who rented and returned the bundle).
   - The sun/moon button in every header switches light and dark mode. The choice is saved in the
     browser (localStorage "rental:theme"); without one, the site follows the device setting.
+  - Favorites: the heart on a bundle saves it to the customer's account on the server
+    (/users/{id}/favorites); the Favorites chip on Browse shows only saved bundles. A guest who taps a
+    heart logs in first, then the bundle is saved.
+  - Trips (My trips): a trip has a name, dates, group size, notes and a list of bundles, saved on the
+    server. Bundles are added from a bundle page ("Add to a trip") and can be removed until the trip is
+    reserved. "Reserve all" first checks that every bundle has a free set for the dates, then reserves
+    each one, adds the reservation to the trip and sends the store its code note. If a bundle has no
+    free set, the customer picks new dates: the server can't change a trip's dates, so the shop makes a
+    new trip with the same details and bundles, deletes the old one and tries again. Trips that aren't
+    reserved yet can be deleted. The server keeps each bundle once per trip.
 
 PHOTOS
 Bundle photos come from Unsplash (unsplash.com) and are free to use under the Unsplash License.
