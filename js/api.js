@@ -13,6 +13,10 @@ const API = (() => {
     "17189796-0863-424d-96d2-49b26edf02d9", "28ea374e-f5f8-4f30-8f63-9838c92f4215", "4fa6f71a-c229-4b90-a0af-1e4fde919a50",
     "76f7761b-6e88-44b4-8e48-9402cb2d252c", "8387f90f-9ae5-4742-91c1-2d776be5275e", "9ef470d2-c16a-49fd-bcce-a81a170f2204"
   ]);
+  // Bundles made by automated tests on the shared class server, like "FavKit A 498308fav" or
+  // "Shelter Only 5004824f1": the name ends in a 9-character run number. They aren't this store's.
+  // shortcut: matched by name, so add a rule if test bundles named another way show up.
+  const TEST_BUNDLE = / \d{6}[0-9a-z]{3}$/i;
 
   async function request(method, path, body) {
     const opts = { method, headers: {} };
@@ -76,7 +80,7 @@ const API = (() => {
     createBundle: (managerId, { name, products, tags }) =>
       post("/bundles", { userId: managerId, name, products, tags }),
     listBundles: tag => get("/bundles" + (tag ? q({ tag }) : ""))      // → [{bundleId, name}]
-      .then(bs => (bs || []).filter(b => !RETIRED_BUNDLES.has(String(b.bundleId)))),
+      .then(bs => (bs || []).filter(b => !RETIRED_BUNDLES.has(String(b.bundleId)) && !TEST_BUNDLE.test(b.name || ""))),
     getBundle: id => get(`/bundles/${encodeURIComponent(id)}`),         // → {bundleId, name, dailyCharge, tags, products[], reviews[]}
     listTags: () => get("/tags"),                                         // → ["camping", ...]
     createSet: (staffId, { bundleId, cleaningFee }) =>

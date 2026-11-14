@@ -19,6 +19,8 @@ NOTES
   - Bundle prices (dailyCharge) are calculated by the server from the products:
     each product costs (cost when new / lifetime in days) per day, so a shorter lifetime means a higher price.
   - The server can't edit or delete bundles. Old bundles are hidden by id in js/api.js (RETIRED_BUNDLES).
+    Bundles made by automated tests on the shared class server (names ending in a run number, like
+    "FavKit A 498308fav") are hidden by name there too (TEST_BUNDLE).
   - The lost-item form lists the set's items once the set is returned.
   - GET /reservations only returns the given user's own reservations, so staff open a
     customer's reservation by the number the customer shows them.
